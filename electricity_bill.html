@@ -9,10 +9,16 @@
   body { font-family: -apple-system, BlinkMacSystemFont, 'Microsoft JhengHei', sans-serif; background: #f0f4f8; min-height: 100vh; padding: 16px; }
   .container { max-width: 480px; margin: 0 auto; }
   h1 { text-align: center; color: #1a3a5c; font-size: 22px; margin-bottom: 6px; }
-  .subtitle { text-align: center; color: #888; font-size: 13px; margin-bottom: 20px; }
 
   .card { background: #fff; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
   .card-title { font-size: 13px; color: #1a3a5c; font-weight: bold; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; }
+
+  .month-select { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .month-select label { font-size: 14px; color: #1a3a5c; font-weight: bold; }
+  .month-select select {
+    flex: 1; padding: 10px 12px; border: 1.5px solid #d0dce8; border-radius: 10px;
+    font-size: 15px; font-family: inherit; background: #fff; color: #1a3a5c; outline: none;
+  }
 
   .row { display: flex; align-items: center; margin-bottom: 10px; }
   .room-label { font-size: 15px; font-weight: bold; color: #1a3a5c; width: 48px; }
@@ -28,15 +34,19 @@
   .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s; font-family: inherit; }
   .btn-primary { background: #1a3a5c; color: #fff; margin-bottom: 10px; }
   .btn-primary:active { background: #0f2540; transform: scale(0.98); }
-  .btn-secondary { background: #e8f0fa; color: #1a3a5c; }
+  .btn-secondary { background: #e8f0fa; color: #1a3a5c; margin-bottom: 10px; }
   .btn-secondary:active { background: #cce0f5; }
+  .btn-back { background: #fff; color: #666; border: 1.5px solid #ddd; margin-bottom: 10px; font-size: 14px; padding: 10px; }
+  .btn-back:active { background: #f5f5f5; }
 
   .result-card { background: #fff; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); display: none; }
   .result-card.show { display: block; }
 
-  .result-title { font-size: 13px; color: #1a3a5c; font-weight: bold; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; }
+  .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; }
+  .result-title { font-size: 15px; font-weight: bold; color: #1a3a5c; }
+  .btn-back-result { font-size: 13px; color: #3b82f6; background: none; border: none; cursor: pointer; text-decoration: underline; padding: 0; font-family: inherit; }
+
   .result-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
-  .result-item:last-of-type { border-bottom: none; }
   .result-room { font-weight: bold; color: #1a3a5c; width: 50px; }
   .result-detail { flex: 1; text-align: center; color: #555; font-size: 13px; }
   .result-amount { font-weight: bold; color: #e53e3e; font-size: 15px; min-width: 70px; text-align: right; }
@@ -59,53 +69,63 @@
 <body>
 <div class="container">
   <h1>🏠 宜蘭電費結算</h1>
-  <p class="month-hint">每度 6 元，請填入本月抄表度數</p>
 
-  <div class="card">
-    <div class="card-title">📝 請輸入本月末抄表度數</div>
-    <div class="row">
-      <div class="room-label">101</div>
-      <div class="room-input"><input type="number" id="r101" placeholder="度數" inputmode="numeric"></div>
-      <span class="room-unit">度</span>
-    </div>
-    <div class="row">
-      <div class="room-label">102</div>
-      <div class="room-input"><input type="number" id="r102" placeholder="度數" inputmode="numeric"></div>
-      <span class="room-unit">度</span>
-    </div>
-    <div class="row">
-      <div class="room-label">201</div>
-      <div class="room-input"><input type="number" id="r201" placeholder="度數" inputmode="numeric"></div>
-      <span class="room-unit">度</span>
-    </div>
-    <div class="row">
-      <div class="room-label">202</div>
-      <div class="room-input"><input type="number" id="r202" placeholder="度數" inputmode="numeric"></div>
-      <span class="room-unit">度</span>
-    </div>
-    <div class="row">
-      <div class="room-label">301</div>
-      <div class="room-input"><input type="number" id="r301" placeholder="度數" inputmode="numeric"></div>
-      <span class="room-unit">度</span>
-    </div>
-    <div class="row">
-      <div class="room-label">302</div>
-      <div class="room-input"><input type="number" id="r302" placeholder="度數" inputmode="numeric"></div>
-      <span class="room-unit">度</span>
+  <!-- 月份選擇 + 輸入區 -->
+  <div id="inputSection">
+    <div class="card">
+      <div class="card-title">📝 請輸入本月末抄表度數</div>
+
+      <div class="month-select">
+        <label for="monthInput">所屬月份</label>
+        <select id="monthInput"></select>
+      </div>
+
+      <div class="row">
+        <div class="room-label">101</div>
+        <div class="room-input"><input type="number" id="r101" placeholder="度數" inputmode="numeric"></div>
+        <span class="room-unit">度</span>
+      </div>
+      <div class="row">
+        <div class="room-label">102</div>
+        <div class="room-input"><input type="number" id="r102" placeholder="度數" inputmode="numeric"></div>
+        <span class="room-unit">度</span>
+      </div>
+      <div class="row">
+        <div class="room-label">201</div>
+        <div class="room-input"><input type="number" id="r201" placeholder="度數" inputmode="numeric"></div>
+        <span class="room-unit">度</span>
+      </div>
+      <div class="row">
+        <div class="room-label">202</div>
+        <div class="room-input"><input type="number" id="r202" placeholder="度數" inputmode="numeric"></div>
+        <span class="room-unit">度</span>
+      </div>
+      <div class="row">
+        <div class="room-label">301</div>
+        <div class="room-input"><input type="number" id="r301" placeholder="度數" inputmode="numeric"></div>
+        <span class="room-unit">度</span>
+      </div>
+      <div class="row">
+        <div class="room-label">302</div>
+        <div class="room-input"><input type="number" id="r302" placeholder="度數" inputmode="numeric"></div>
+        <span class="room-unit">度</span>
+      </div>
+
+      <div class="last-record" id="lastRecord">
+        上月結算度數參考：<br>
+        <strong>101</strong> 11666 &nbsp;|&nbsp; <strong>102</strong> 7280 &nbsp;|&nbsp; <strong>201</strong> 13871 &nbsp;|&nbsp; <strong>202</strong> 14624 &nbsp;|&nbsp; <strong>301</strong> 18785 &nbsp;|&nbsp; <strong>302</strong> 17232
+      </div>
     </div>
 
-    <div class="last-record" id="lastRecord">
-      上月結算度數參考：<br>
-      <strong>101</strong> 11666 &nbsp;|&nbsp; <strong>102</strong> 7280 &nbsp;|&nbsp; <strong>201</strong> 13871 &nbsp;|&nbsp; <strong>202</strong> 14624 &nbsp;|&nbsp; <strong>301</strong> 18785 &nbsp;|&nbsp; <strong>302</strong> 17232
-    </div>
+    <button class="btn btn-primary" onclick="calculate()">⚡ 計算電費</button>
   </div>
 
-  <button class="btn btn-primary" onclick="calculate()">⚡ 計算電費</button>
-  <button class="btn btn-secondary" onclick="copyResult()">📋 複製帳單文字</button>
-  <p class="success-msg" id="successMsg">✅ 已複製到剪貼簿！貼到 LINE 群組即可</p>
-
+  <!-- 帳單區 -->
   <div class="result-card" id="resultCard">
-    <div class="result-title">📊 電費帳單</div>
+    <div class="result-header">
+      <span class="result-title">📊 <span id="billMonth"></span> 電費帳單</span>
+      <button class="btn-back-result" onclick="goBack()">← 返回修改</button>
+    </div>
     <div id="resultItems"></div>
     <div class="result-total">
       <span class="result-total-label">💰 合計</span>
@@ -113,36 +133,56 @@
     </div>
     <div class="copy-box" id="copyBox"></div>
   </div>
+
+  <button class="btn btn-secondary" id="copyBtn" onclick="copyResult()" style="display:none">📋 複製帳單文字</button>
+  <p class="success-msg" id="successMsg">✅ 已複製到剪貼簿！貼到 LINE 群組即可</p>
 </div>
 
 <script>
 const RATE = 6;
 const LAST_MONTH = { '101': 11666, '102': 7280, '201': 13871, '202': 14624, '301': 18785, '302': 17232 };
 
+// Build month selector: current month + previous 11 months
+const monthSelect = document.getElementById('monthInput');
+const now = new Date();
+for (let i = 0; i < 12; i++) {
+  const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+  const val = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}`;
+  const label = `${d.getFullYear()}年${d.getMonth()+1}月`;
+  monthSelect.options.add(new Option(label, val));
+}
+
 function calculate() {
+  const month = document.getElementById('monthInput').value;
   const rooms = ['101','102','201','202','301','302'];
   let total = 0;
-  let billText = `🏠 宜蘭電費帳單\n${new Date().toLocaleDateString('zh-TW')}\n─────────────────\n`;
+  const billDate = new Date().toLocaleDateString('zh-TW');
+
+  // Format month label
+  const [year, mon] = month.split('/');
+  const monthLabel = `${year}年${parseInt(mon)}月`;
+
+  let billText = `🏠 宜蘭${monthLabel}電費帳單\n${billDate}\n─────────────────\n`;
   let resultHTML = '';
 
   let allEmpty = true;
   for (const r of rooms) {
-    const val = document.getElementById('r'+r).value.trim();
-    if (val) { allEmpty = false; break; }
+    const v = document.getElementById('r'+r).value.trim();
+    if (v) { allEmpty = false; break; }
   }
   if (allEmpty) { alert('請至少填入一個房間的度數'); return; }
 
   for (const r of rooms) {
-    const val = document.getElementById('r'+r).value.trim();
-    if (!val) continue;
-    const current = parseFloat(val);
+    const v = document.getElementById('r'+r).value.trim();
+    if (!v) continue;
+    const current = parseFloat(v);
     const prev = LAST_MONTH[r];
     const used = current - prev;
     const fee = used * RATE;
     total += fee;
 
-    const usedDisplay = used >= 0 ? used : '▲' + Math.abs(used) + ' (異常)';
-    const feeDisplay = fee >= 0 ? fee : Math.abs(fee) + ' (異常)';
+    const usedDisplay = used >= 0 ? used : '▲' + Math.abs(used) + '(異常)';
+    const feeDisplay = fee >= 0 ? fee : Math.abs(fee) + '(異常)';
 
     billText += `房間 ${r}｜用電 ${usedDisplay} 度｜應繳 ${feeDisplay} 元\n`;
     resultHTML += `
@@ -154,11 +194,22 @@ function calculate() {
   }
 
   billText += `─────────────────\n💰 合計：${total} 元\n`;
+
+  document.getElementById('billMonth').textContent = monthLabel;
   document.getElementById('resultItems').innerHTML = resultHTML;
   document.getElementById('totalAmount').textContent = total + ' 元';
   document.getElementById('copyBox').textContent = billText;
+
+  document.getElementById('inputSection').style.display = 'none';
   document.getElementById('resultCard').classList.add('show');
-  document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('copyBtn').style.display = 'block';
+  document.getElementById('copyBtn').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function goBack() {
+  document.getElementById('resultCard').classList.remove('show');
+  document.getElementById('copyBtn').style.display = 'none';
+  document.getElementById('inputSection').style.display = 'block';
 }
 
 function copyResult() {
@@ -168,7 +219,6 @@ function copyResult() {
     document.getElementById('successMsg').classList.add('show');
     setTimeout(() => document.getElementById('successMsg').classList.remove('show'), 3000);
   }).catch(() => {
-    // Fallback
     const ta = document.createElement('textarea');
     ta.value = text;
     document.body.appendChild(ta);
@@ -179,14 +229,6 @@ function copyResult() {
     setTimeout(() => document.getElementById('successMsg').classList.remove('show'), 3000);
   });
 }
-
-// Enter key navigation
-document.querySelectorAll('input').forEach((input, idx, arr) => {
-  input.addEventListener('enter', () => {
-    if (idx < arr.length - 1) arr[idx + 1].focus();
-    else calculate();
-  });
-});
 </script>
 </body>
 </html>
