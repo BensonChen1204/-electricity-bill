@@ -9,6 +9,7 @@
   body { font-family: -apple-system, BlinkMacSystemFont, 'Microsoft JhengHei', sans-serif; background: #f0f4f8; min-height: 100vh; padding: 16px; }
   .container { max-width: 480px; margin: 0 auto; }
   h1 { text-align: center; color: #1a3a5c; font-size: 22px; margin-bottom: 6px; }
+  .subtitle { text-align: center; color: #888; font-size: 12px; margin-bottom: 16px; }
 
   .card { background: #fff; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
   .card-title { font-size: 13px; color: #1a3a5c; font-weight: bold; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; }
@@ -22,14 +23,16 @@
 
   .row { display: flex; align-items: center; margin-bottom: 10px; }
   .room-label { font-size: 15px; font-weight: bold; color: #1a3a5c; width: 48px; }
-  .room-input { flex: 1; }
-  .room-input input {
+  .prev-reading { flex: 1; text-align: right; font-size: 14px; color: #888; padding-right: 8px; }
+  .current-input { width: 110px; }
+  .current-input input {
     width: 100%; padding: 10px 12px; border: 1.5px solid #d0dce8; border-radius: 10px;
     font-size: 16px; text-align: right; outline: none; transition: border 0.2s;
     font-family: inherit;
+    background: #fffde7;
   }
-  .room-input input:focus { border-color: #3b82f6; }
-  .room-unit { font-size: 13px; color: #888; margin-left: 8px; }
+  .current-input input:focus { border-color: #3b82f6; background: #fff; }
+  .room-unit { font-size: 13px; color: #888; margin-left: 6px; }
 
   .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s; font-family: inherit; }
   .btn-primary { background: #1a3a5c; color: #fff; margin-bottom: 10px; }
@@ -37,8 +40,6 @@
   .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
   .btn-secondary { background: #e8f0fa; color: #1a3a5c; margin-bottom: 10px; }
   .btn-secondary:active { background: #cce0f5; }
-  .btn-history { background: #fff; color: #666; border: 1.5px solid #ddd; margin-bottom: 10px; font-size: 14px; padding: 10px; }
-  .btn-history:active { background: #f5f5f5; }
   .btn-back-result { font-size: 13px; color: #3b82f6; background: none; border: none; cursor: pointer; text-decoration: underline; padding: 0; font-family: inherit; }
 
   .result-card { background: #fff; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); display: none; }
@@ -54,8 +55,8 @@
   .result-total-label { font-weight: bold; color: #1a3a5c; }
   .result-total-amount { font-weight: bold; color: #e53e3e; font-size: 20px; }
 
-  .copy-box { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-top: 10px; font-size: 13px; color: #333; white-space: pre-wrap; line-height: 1.6; display: none; }
-  .copy-box.show { display: block; }
+  .bill-display { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-top: 10px; font-size: 13px; color: #333; white-space: pre-wrap; line-height: 1.6; display: none; }
+  .bill-display.show { display: block; }
 
   .success-msg { color: #38a169; font-size: 13px; text-align: center; margin-top: 6px; display: none; }
   .success-msg.show { display: block; }
@@ -66,23 +67,12 @@
   .loading-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); justify-content: center; align-items: center; z-index: 999; }
   .loading-overlay.show { display: flex; }
   .loading-text { background: #fff; padding: 20px 30px; border-radius: 12px; font-size: 15px; color: #1a3a5c; font-weight: bold; }
-
-  .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; padding: 16px; }
-  .modal-overlay.show { display: flex; }
-  .modal { background: #fff; border-radius: 16px; padding: 20px; max-width: 420px; width: 100%; max-height: 80vh; overflow-y: auto; }
-  .modal-title { font-size: 16px; font-weight: bold; color: #1a3a5c; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; display: flex; justify-content: space-between; align-items: center; }
-  .modal-close { font-size: 20px; color: #888; background: none; border: none; cursor: pointer; padding: 0; font-family: inherit; }
-  .modal-close:hover { color: #333; }
-  .history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .history-table th { background: #e8f0fa; color: #1a3a5c; padding: 8px 6px; text-align: left; font-weight: bold; border-bottom: 2px solid #cce0f5; }
-  .history-table td { padding: 7px 6px; border-bottom: 1px solid #f0f0f0; color: #333; }
-  .history-table tr:last-child td { border-bottom: none; }
-  .history-empty { text-align: center; color: #888; font-size: 13px; padding: 20px; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>🏠 宜蘭電費結算</h1>
+  <p class="subtitle">每度 6 元，自動帶入上月度數</p>
 
   <div id="inputSection">
     <div class="card">
@@ -91,59 +81,71 @@
       <div class="month-select">
         <label for="monthInput">所屬月份</label>
         <select id="monthInput"></select>
-        <button class="btn btn-history" onclick="showHistory()" style="margin-bottom:0; padding:8px 12px; font-size:13px;">📋 歷史</button>
       </div>
 
-      <div class="row">
+      <div class="row" style="font-size:12px; color:#aaa; margin-bottom:6px;">
+        <div class="room-label" style="color:#aaa;">房號</div>
+        <div class="prev-reading" style="text-align:right;">上次結算度數</div>
+        <div class="current-input" style="text-align:right; font-weight:bold; color:#1a3a5c;">本月填入</div>
+        <div></div>
+      </div>
+
+      <div class="row" id="row101">
         <div class="room-label">101</div>
-        <div class="room-input"><input type="number" id="r101" placeholder="度數" inputmode="numeric"></div>
+        <div class="prev-reading" id="prev101">—</div>
+        <div class="current-input"><input type="number" id="cur101" placeholder="本月" inputmode="numeric"></div>
         <span class="room-unit">度</span>
       </div>
-      <div class="row">
+      <div class="row" id="row102">
         <div class="room-label">102</div>
-        <div class="room-input"><input type="number" id="r102" placeholder="度數" inputmode="numeric"></div>
+        <div class="prev-reading" id="prev102">—</div>
+        <div class="current-input"><input type="number" id="cur102" placeholder="本月" inputmode="numeric"></div>
         <span class="room-unit">度</span>
       </div>
-      <div class="row">
+      <div class="row" id="row201">
         <div class="room-label">201</div>
-        <div class="room-input"><input type="number" id="r201" placeholder="度數" inputmode="numeric"></div>
+        <div class="prev-reading" id="prev201">—</div>
+        <div class="current-input"><input type="number" id="cur201" placeholder="本月" inputmode="numeric"></div>
         <span class="room-unit">度</span>
       </div>
-      <div class="row">
+      <div class="row" id="row202">
         <div class="room-label">202</div>
-        <div class="room-input"><input type="number" id="r202" placeholder="度數" inputmode="numeric"></div>
+        <div class="prev-reading" id="prev202">—</div>
+        <div class="current-input"><input type="number" id="cur202" placeholder="本月" inputmode="numeric"></div>
         <span class="room-unit">度</span>
       </div>
-      <div class="row">
+      <div class="row" id="row301">
         <div class="room-label">301</div>
-        <div class="room-input"><input type="number" id="r301" placeholder="度數" inputmode="numeric"></div>
+        <div class="prev-reading" id="prev301">—</div>
+        <div class="current-input"><input type="number" id="cur301" placeholder="本月" inputmode="numeric"></div>
         <span class="room-unit">度</span>
       </div>
-      <div class="row">
+      <div class="row" id="row302">
         <div class="room-label">302</div>
-        <div class="room-input"><input type="number" id="r302" placeholder="度數" inputmode="numeric"></div>
+        <div class="prev-reading" id="prev302">—</div>
+        <div class="current-input"><input type="number" id="cur302" placeholder="本月" inputmode="numeric"></div>
         <span class="room-unit">度</span>
       </div>
     </div>
 
-    <button class="btn btn-primary" id="calcBtn" onclick="calculate()">⚡ 計算電費</button>
+    <button class="btn btn-primary" id="calcBtn" onclick="calculate()">📋 產生本月帳單</button>
     <p class="error-msg" id="errorMsg"></p>
   </div>
 
   <div class="result-card" id="resultCard">
     <div class="result-header">
-      <span class="result-title">📊 <span id="billMonth"></span> 電費帳單</span>
-      <button class="btn-back-result" onclick="goBack()">← 返回修改</button>
+      <span class="result-title" id="resultTitle">📊 電費帳單</span>
+      <button class="btn-back-result" onclick="goBack()">← 重新填寫</button>
     </div>
     <div id="resultItems"></div>
     <div class="result-total">
       <span class="result-total-label">💰 合計</span>
       <span class="result-total-amount" id="totalAmount"></span>
     </div>
-    <div class="copy-box" id="copyBox"></div>
+    <div class="bill-display" id="billDisplay"></div>
   </div>
 
-  <button class="btn btn-secondary" id="copyBtn" onclick="copyResult()" style="display:none">📋 複製帳單文字</button>
+  <button class="btn btn-secondary" id="copyBtn" onclick="copyBill()" style="display:none">📋 複製帳單文字</button>
   <p class="success-msg" id="successMsg">✅ 已複製到剪貼簿！貼到 LINE 群組即可</p>
 </div>
 
@@ -151,22 +153,11 @@
   <div class="loading-text">處理中，請稍候...</div>
 </div>
 
-<!-- 歷史查詢 Modal -->
-<div class="modal-overlay" id="historyModal">
-  <div class="modal">
-    <div class="modal-title">
-      <span>📋 歷史抄表記錄</span>
-      <button class="modal-close" onclick="closeHistory()">✕</button>
-    </div>
-    <div id="historyContent">
-      <div class="history-empty">讀取中...</div>
-    </div>
-  </div>
-</div>
-
 <script>
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwBrSUDF2nmK6baS71HECkIKi2s9dyXzE6e9srTnbaxQSJgIxpXW6TAfa75sDScoFkm2g/exec';
+var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzlnUgdbl7jjCWMRYKztm-r4v_At46LTMUDqW9aTV_KvOytGxlQQYDlh6kx_onyGXqfHQ/exec';
+var ROOMS = ['101','102','201','202','301','302'];
 
+// Build month selector
 var monthSelect = document.getElementById('monthInput');
 var now = new Date();
 for (var i = 0; i < 12; i++) {
@@ -176,6 +167,27 @@ for (var i = 0; i < 12; i++) {
   monthSelect.options.add(new Option(label, val));
 }
 
+// Load latest readings on page load
+(function loadLatest() {
+  document.getElementById('loadingOverlay').classList.add('show');
+  fetch(APPS_SCRIPT_URL + '?_=' + Date.now())
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+      document.getElementById('loadingOverlay').classList.remove('show');
+      if (data && data.ok && data.latest) {
+        for (var i = 0; i < ROOMS.length; i++) {
+          var r = ROOMS[i];
+          if (data.latest[r]) {
+            document.getElementById('prev' + r).textContent = data.latest[r].reading;
+          }
+        }
+      }
+    })
+    .catch(function() {
+      document.getElementById('loadingOverlay').classList.remove('show');
+    });
+})();
+
 function showError(msg) {
   var el = document.getElementById('errorMsg');
   el.textContent = msg;
@@ -183,92 +195,43 @@ function showError(msg) {
   setTimeout(function() { el.classList.remove('show'); }, 5000);
 }
 
-function showHistory() {
-  document.getElementById('historyModal').classList.add('show');
-  document.getElementById('historyContent').innerHTML = '<div class="history-empty">讀取中...</div>';
-  fetch(APPS_SCRIPT_URL + '?dummy=' + Date.now())
-    .then(function(resp) { return resp.json(); })
-    .then(function(data) {
-      if (!data || data.length === 0) {
-        document.getElementById('historyContent').innerHTML = '<div class="history-empty">尚無記錄</div>';
-        return;
-      }
-      var html = '<table class="history-table"><thead><tr><th>房號</th><th>月份</th><th>當月度數</th></tr></thead><tbody>';
-      var lastByRoom = {};
-      for (var i = 0; i < data.length; i++) {
-        lastByRoom[data[i].room] = data[i];
-      }
-      var rooms = ['101','102','201','202','301','302'];
-      for (var j = 0; j < rooms.length; j++) {
-        var r = rooms[j];
-        if (lastByRoom[r]) {
-          var d = lastByRoom[r];
-          html += '<tr><td>' + d.room + '</td><td>' + d.month + '</td><td>' + (d.reading || '—') + '</td></tr>';
-        }
-      }
-      html += '</tbody></table>';
-      document.getElementById('historyContent').innerHTML = html;
-    })
-    .catch(function() {
-      document.getElementById('historyContent').innerHTML = '<div class="history-empty">讀取失敗，請稍後再試</div>';
-    });
-}
-
-function closeHistory() {
-  document.getElementById('historyModal').classList.remove('show');
-}
-
 function calculate() {
   var month = document.getElementById('monthInput').value;
-  var rooms = ['101','102','201','202','301','302'];
   var readings = {};
   var allEmpty = true;
-  for (var idx = 0; idx < rooms.length; idx++) {
-    var v = document.getElementById('r' + rooms[idx]).value.trim();
-    if (v) { allEmpty = false; readings[rooms[idx]] = v; }
+  for (var i = 0; i < ROOMS.length; i++) {
+    var r = ROOMS[i];
+    var v = document.getElementById('cur' + r).value.trim();
+    if (v) { allEmpty = false; readings[r] = v; }
   }
-  if (allEmpty) { showError('請至少填入一個房間的度數'); return; }
+  if (allEmpty) { showError('請至少填入一個房間的本月度數'); return; }
 
   document.getElementById('calcBtn').disabled = true;
   document.getElementById('loadingOverlay').classList.add('show');
 
-  var payload = JSON.stringify({ month: month, readings: readings });
   fetch(APPS_SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: payload
+    body: JSON.stringify({ month: month, readings: readings })
   })
   .then(function(resp) { return resp.json(); })
   .then(function(data) {
     document.getElementById('loadingOverlay').classList.remove('show');
     document.getElementById('calcBtn').disabled = false;
-    if (!data || !data.billText) { showError('系統錯誤，請稍後再試'); return; }
-    var parts = data.billText.split('\n');
-    var detailLines = [];
-    for (var i = 4; i < parts.length; i++) {
-      if (parts[i].indexOf('｜') > -1) { detailLines.push(parts[i]); }
+    if (!data || !data.ok) {
+      showError(data && data.error ? data.error : '系統錯誤，請稍後再試');
+      return;
     }
-    var resultHTML = '';
-    for (var j = 0; j < detailLines.length; j++) {
-      var line = detailLines[j];
-      var room = line.substring(3, line.indexOf('｜'));
-      var usedFee = line.substring(line.indexOf('｜') + 1);
-      var used = usedFee.substring(3, usedFee.indexOf('度'));
-      var fee = usedFee.substring(usedFee.indexOf('元') - usedFee.indexOf('度'), usedFee.indexOf('元'));
-      resultHTML += '<div class="result-item"><span class="result-room">' + room + '</span><span class="result-detail">用電 ' + used + ' 度 × 6元</span><span class="result-amount">' + fee + ' 元</span></div>';
-    }
-    var monthParts = month.split('/');
-    var monthLabel = parseInt(monthParts[1]) + '月';
-    document.getElementById('billMonth').textContent = monthLabel;
-    document.getElementById('resultItems').innerHTML = resultHTML;
+    document.getElementById('resultTitle').textContent = '📊 ' + month + ' 電費帳單';
     document.getElementById('totalAmount').textContent = data.total + ' 元';
-    document.getElementById('copyBox').textContent = data.billText;
+    document.getElementById('billDisplay').textContent = data.billText;
+    document.getElementById('billDisplay').classList.add('show');
     document.getElementById('inputSection').style.display = 'none';
     document.getElementById('resultCard').classList.add('show');
     document.getElementById('copyBtn').style.display = 'block';
     document.getElementById('copyBtn').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   })
-  .catch(function(error) {
+  .catch(function(err) {
     document.getElementById('loadingOverlay').classList.remove('show');
     document.getElementById('calcBtn').disabled = false;
     showError('連線失敗，請確認網路後再試');
@@ -279,11 +242,12 @@ function goBack() {
   document.getElementById('resultCard').classList.remove('show');
   document.getElementById('copyBtn').style.display = 'none';
   document.getElementById('inputSection').style.display = 'block';
+  document.getElementById('billDisplay').classList.remove('show');
 }
 
-function copyResult() {
-  var text = document.getElementById('copyBox').textContent;
-  if (!text) { showError('請先按「計算電費」'); return; }
+function copyBill() {
+  var text = document.getElementById('billDisplay').textContent;
+  if (!text) { showError('請先產生帳單'); return; }
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text).then(function() {
       document.getElementById('successMsg').classList.add('show');
