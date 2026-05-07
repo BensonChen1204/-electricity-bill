@@ -37,6 +37,8 @@
   .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
   .btn-secondary { background: #e8f0fa; color: #1a3a5c; margin-bottom: 10px; }
   .btn-secondary:active { background: #cce0f5; }
+  .btn-history { background: #fff; color: #666; border: 1.5px solid #ddd; margin-bottom: 10px; font-size: 14px; padding: 10px; }
+  .btn-history:active { background: #f5f5f5; }
   .btn-back-result { font-size: 13px; color: #3b82f6; background: none; border: none; cursor: pointer; text-decoration: underline; padding: 0; font-family: inherit; }
 
   .result-card { background: #fff; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); display: none; }
@@ -58,17 +60,24 @@
   .success-msg { color: #38a169; font-size: 13px; text-align: center; margin-top: 6px; display: none; }
   .success-msg.show { display: block; }
 
-  .last-record { background: #fff8e1; border-radius: 10px; padding: 12px; margin-top: 14px; font-size: 12px; color: #666; }
-  .last-record strong { color: #1a3a5c; }
-
-  .month-hint { text-align: center; font-size: 12px; color: #aaa; margin-bottom: 14px; }
+  .error-msg { color: #e53e3e; font-size: 13px; text-align: center; margin-top: 8px; display: none; }
+  .error-msg.show { display: block; }
 
   .loading-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); justify-content: center; align-items: center; z-index: 999; }
   .loading-overlay.show { display: flex; }
   .loading-text { background: #fff; padding: 20px 30px; border-radius: 12px; font-size: 15px; color: #1a3a5c; font-weight: bold; }
 
-  .error-msg { color: #e53e3e; font-size: 13px; text-align: center; margin-top: 8px; display: none; }
-  .error-msg.show { display: block; }
+  .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; padding: 16px; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: #fff; border-radius: 16px; padding: 20px; max-width: 420px; width: 100%; max-height: 80vh; overflow-y: auto; }
+  .modal-title { font-size: 16px; font-weight: bold; color: #1a3a5c; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; display: flex; justify-content: space-between; align-items: center; }
+  .modal-close { font-size: 20px; color: #888; background: none; border: none; cursor: pointer; padding: 0; font-family: inherit; }
+  .modal-close:hover { color: #333; }
+  .history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .history-table th { background: #e8f0fa; color: #1a3a5c; padding: 8px 6px; text-align: left; font-weight: bold; border-bottom: 2px solid #cce0f5; }
+  .history-table td { padding: 7px 6px; border-bottom: 1px solid #f0f0f0; color: #333; }
+  .history-table tr:last-child td { border-bottom: none; }
+  .history-empty { text-align: center; color: #888; font-size: 13px; padding: 20px; }
 </style>
 </head>
 <body>
@@ -82,6 +91,7 @@
       <div class="month-select">
         <label for="monthInput">所屬月份</label>
         <select id="monthInput"></select>
+        <button class="btn btn-history" onclick="showHistory()" style="margin-bottom:0; padding:8px 12px; font-size:13px;">📋 歷史</button>
       </div>
 
       <div class="row">
@@ -114,11 +124,6 @@
         <div class="room-input"><input type="number" id="r302" placeholder="度數" inputmode="numeric"></div>
         <span class="room-unit">度</span>
       </div>
-
-      <div class="last-record" id="lastRecord">
-        提示：請參考上月結算度數，確保數字合理<br>
-        <strong>101</strong> 11666 &nbsp;|&nbsp; <strong>102</strong> 7280 &nbsp;|&nbsp; <strong>201</strong> 13871 &nbsp;|&nbsp; <strong>202</strong> 14624 &nbsp;|&nbsp; <strong>301</strong> 18785 &nbsp;|&nbsp; <strong>302</strong> 17232
-      </div>
     </div>
 
     <button class="btn btn-primary" id="calcBtn" onclick="calculate()">⚡ 計算電費</button>
@@ -146,10 +151,21 @@
   <div class="loading-text">處理中，請稍候...</div>
 </div>
 
-<script>
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyj84-GJXv1dfpl2D8FmglqFSV7WscgJO2uYiqKXFxa9J6Vr_-lbqZRM7uf-1aR6STSBQ/exec';
+<!-- 歷史查詢 Modal -->
+<div class="modal-overlay" id="historyModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span>📋 歷史抄表記錄</span>
+      <button class="modal-close" onclick="closeHistory()">✕</button>
+    </div>
+    <div id="historyContent">
+      <div class="history-empty">讀取中...</div>
+    </div>
+  </div>
+</div>
 
-var SHEET_ID = '15mL9KGkWmC9-ONUw-Nirk2hyv0zUmjtBkd7uIBDJPVU';
+<script>
+var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz3rgmvmcT4KjMiKz05Dh1ZtlATpda5cDVaX6CdqJiXPL9w3qQBuyBo0NHFDEazWg2fjg/exec';
 
 var monthSelect = document.getElementById('monthInput');
 var now = new Date();
@@ -165,6 +181,41 @@ function showError(msg) {
   el.textContent = msg;
   el.classList.add('show');
   setTimeout(function() { el.classList.remove('show'); }, 5000);
+}
+
+function showHistory() {
+  document.getElementById('historyModal').classList.add('show');
+  document.getElementById('historyContent').innerHTML = '<div class="history-empty">讀取中...</div>';
+  fetch(APPS_SCRIPT_URL + '?dummy=' + Date.now())
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+      if (!data || data.length === 0) {
+        document.getElementById('historyContent').innerHTML = '<div class="history-empty">尚無記錄</div>';
+        return;
+      }
+      var html = '<table class="history-table"><thead><tr><th>房號</th><th>月份</th><th>當月度數</th></tr></thead><tbody>';
+      var lastByRoom = {};
+      for (var i = 0; i < data.length; i++) {
+        lastByRoom[data[i].room] = data[i];
+      }
+      var rooms = ['101','102','201','202','301','302'];
+      for (var j = 0; j < rooms.length; j++) {
+        var r = rooms[j];
+        if (lastByRoom[r]) {
+          var d = lastByRoom[r];
+          html += '<tr><td>' + d.room + '</td><td>' + d.month + '</td><td>' + (d.reading || '—') + '</td></tr>';
+        }
+      }
+      html += '</tbody></table>';
+      document.getElementById('historyContent').innerHTML = html;
+    })
+    .catch(function() {
+      document.getElementById('historyContent').innerHTML = '<div class="history-empty">讀取失敗，請稍後再試</div>';
+    });
+}
+
+function closeHistory() {
+  document.getElementById('historyModal').classList.remove('show');
 }
 
 function calculate() {
@@ -223,7 +274,6 @@ function calculate() {
     showError('連線失敗，請確認網路後再試');
   });
 }
-}
 
 function goBack() {
   document.getElementById('resultCard').classList.remove('show');
@@ -238,12 +288,8 @@ function copyResult() {
     navigator.clipboard.writeText(text).then(function() {
       document.getElementById('successMsg').classList.add('show');
       setTimeout(function() { document.getElementById('successMsg').classList.remove('show'); }, 3000);
-    }).catch(function() {
-      fallbackCopy(text);
-    });
-  } else {
-    fallbackCopy(text);
-  }
+    }).catch(function() { fallbackCopy(text); });
+  } else { fallbackCopy(text); }
 }
 
 function fallbackCopy(text) {
