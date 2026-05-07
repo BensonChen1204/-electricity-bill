@@ -14,11 +14,12 @@
   .card { background: #fff; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
   .card-title { font-size: 13px; color: #1a3a5c; font-weight: bold; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; }
 
-  .month-select { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .month-select label { font-size: 14px; color: #1a3a5c; font-weight: bold; }
-  .month-select select {
-    flex: 1; padding: 10px 12px; border: 1.5px solid #d0dce8; border-radius: 10px;
-    font-size: 15px; font-family: inherit; background: #fff; color: #1a3a5c; outline: none;
+  .date-row { display: flex; gap: 10px; margin-bottom: 14px; }
+  .date-field { flex: 1; }
+  .date-field label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; font-weight: bold; }
+  .date-field input {
+    width: 100%; padding: 9px 10px; border: 1.5px solid #d0dce8; border-radius: 10px;
+    font-size: 14px; font-family: inherit; background: #fff; color: #1a3a5c; outline: none;
   }
 
   .row { display: flex; align-items: center; margin-bottom: 10px; }
@@ -46,6 +47,7 @@
   .result-card.show { display: block; }
   .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; }
   .result-title { font-size: 15px; font-weight: bold; color: #1a3a5c; }
+  .result-subtitle { font-size: 12px; color: #888; margin-top: 2px; }
 
   .result-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
   .result-room { font-weight: bold; color: #1a3a5c; width: 50px; }
@@ -78,14 +80,20 @@
     <div class="card">
       <div class="card-title">📝 請輸入本月末抄表度數</div>
 
-      <div class="month-select">
-        <label for="monthInput">所屬月份</label>
-        <select id="monthInput"></select>
+      <div class="date-row">
+        <div class="date-field">
+          <label for="billMonth">帳單月份</label>
+          <input type="month" id="billMonth">
+        </div>
+        <div class="date-field">
+          <label for="readingDate">抄表日期</label>
+          <input type="date" id="readingDate">
+        </div>
       </div>
 
-      <div class="row" style="font-size:12px; color:#aaa; margin-bottom:6px;">
+      <div class="row" style="font-size:12px; color:#aaa; margin-bottom:6px; margin-top:6px;">
         <div class="room-label" style="color:#aaa;">房號</div>
-        <div class="prev-reading" style="text-align:right;">上次結算度數</div>
+        <div class="prev-reading" style="text-align:right;">上月結算</div>
         <div class="current-input" style="text-align:right; font-weight:bold; color:#1a3a5c;">本月填入</div>
         <div></div>
       </div>
@@ -134,7 +142,10 @@
 
   <div class="result-card" id="resultCard">
     <div class="result-header">
-      <span class="result-title" id="resultTitle">📊 電費帳單</span>
+      <div>
+        <span class="result-title" id="resultTitle">📊 電費帳單</span>
+        <div class="result-subtitle" id="resultSubtitle"></div>
+      </div>
       <button class="btn-back-result" onclick="goBack()">← 重新填寫</button>
     </div>
     <div id="resultItems"></div>
@@ -154,18 +165,19 @@
 </div>
 
 <script>
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzbZ_JlAW2R7sNQWWHDTAoKbYMFCl7q9Mhna_zcEphhYIwHxPfx8NOtLEstu_3RRr51KA/exec';
+var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyr0HPkqgrCruEHLwc_yBGFMgPAEE8CWUlkq0sQLvSCXW3wPLCkxMRHgHlayHin11fwSA/exec';
 var ROOMS = ['101','102','201','202','301','302'];
 
-// Build month selector
-var monthSelect = document.getElementById('monthInput');
-var now = new Date();
-for (var i = 0; i < 12; i++) {
-  var d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-  var val = d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0');
-  var label = d.getFullYear() + '年' + (d.getMonth() + 1) + '月';
-  monthSelect.options.add(new Option(label, val));
-}
+// 初始化月份與抄表日期預設值
+(function initDefaults() {
+  var now = new Date();
+  var yyyy = now.getFullYear();
+  var mm = String(now.getMonth() + 1).padStart(2, '0');
+  document.getElementById('billMonth').value = yyyy + '-' + mm;
+
+  var dd = String(now.getDate()).padStart(2, '0');
+  document.getElementById('readingDate').value = yyyy + '-' + mm + '-' + dd;
+})();
 
 // Load latest readings on page load
 (function loadLatest() {
@@ -196,7 +208,12 @@ function showError(msg) {
 }
 
 function calculate() {
-  var month = document.getElementById('monthInput').value;
+  var month = document.getElementById('billMonth').value; // YYYY-MM
+  var readingDate = document.getElementById('readingDate').value; // YYYY-MM-DD
+
+  if (!month) { showError('請選擇帳單月份'); return; }
+  if (!readingDate) { showError('請填入抄表日期'); return; }
+
   var readings = {};
   var allEmpty = true;
   for (var i = 0; i < ROOMS.length; i++) {
@@ -212,7 +229,7 @@ function calculate() {
   fetch(APPS_SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ month: month, readings: readings })
+    body: JSON.stringify({ month: month, readingDate: readingDate, readings: readings })
   })
   .then(function(resp) { return resp.json(); })
   .then(function(data) {
@@ -222,7 +239,12 @@ function calculate() {
       showError(data && data.error ? data.error : '系統錯誤，請稍後再試');
       return;
     }
-    document.getElementById('resultTitle').textContent = '📊 ' + month + ' 電費帳單';
+    // 顯示月份（YYYY-MM -> 2026年6月）
+    var parts = month.split('-');
+    var monthDisplay = parts[0] + '年' + parseInt(parts[1]) + '月';
+    document.getElementById('resultTitle').textContent = '📊 ' + monthDisplay + ' 電費帳單';
+    var dateDisplay = readingDate.replace(/-/g, '/');
+    document.getElementById('resultSubtitle').textContent = '抄表日期：' + dateDisplay;
     document.getElementById('totalAmount').textContent = data.total + ' 元';
     document.getElementById('billDisplay').textContent = data.billText;
     document.getElementById('billDisplay').classList.add('show');
