@@ -1,5 +1,192 @@
 <!DOCTYPE html>
-<html>
-<head><meta http-equiv="refresh" content="0;url=electricity_bill.html"></head>
-<body><p>跳轉中...</p></body>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>宜蘭電費結算</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Microsoft JhengHei', sans-serif; background: #f0f4f8; min-height: 100vh; padding: 16px; }
+  .container { max-width: 480px; margin: 0 auto; }
+  h1 { text-align: center; color: #1a3a5c; font-size: 22px; margin-bottom: 6px; }
+  .subtitle { text-align: center; color: #888; font-size: 13px; margin-bottom: 20px; }
+
+  .card { background: #fff; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .card-title { font-size: 13px; color: #1a3a5c; font-weight: bold; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; }
+
+  .row { display: flex; align-items: center; margin-bottom: 10px; }
+  .room-label { font-size: 15px; font-weight: bold; color: #1a3a5c; width: 48px; }
+  .room-input { flex: 1; }
+  .room-input input {
+    width: 100%; padding: 10px 12px; border: 1.5px solid #d0dce8; border-radius: 10px;
+    font-size: 16px; text-align: right; outline: none; transition: border 0.2s;
+    font-family: inherit;
+  }
+  .room-input input:focus { border-color: #3b82f6; }
+  .room-unit { font-size: 13px; color: #888; margin-left: 8px; }
+
+  .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .btn-primary { background: #1a3a5c; color: #fff; margin-bottom: 10px; }
+  .btn-primary:active { background: #0f2540; transform: scale(0.98); }
+  .btn-secondary { background: #e8f0fa; color: #1a3a5c; }
+  .btn-secondary:active { background: #cce0f5; }
+
+  .result-card { background: #fff; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); display: none; }
+  .result-card.show { display: block; }
+
+  .result-title { font-size: 13px; color: #1a3a5c; font-weight: bold; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8f0fa; }
+  .result-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+  .result-item:last-of-type { border-bottom: none; }
+  .result-room { font-weight: bold; color: #1a3a5c; width: 50px; }
+  .result-detail { flex: 1; text-align: center; color: #555; font-size: 13px; }
+  .result-amount { font-weight: bold; color: #e53e3e; font-size: 15px; min-width: 70px; text-align: right; }
+  .result-total { background: #fff8e1; border-radius: 10px; padding: 12px 14px; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .result-total-label { font-weight: bold; color: #1a3a5c; }
+  .result-total-amount { font-weight: bold; color: #e53e3e; font-size: 20px; }
+
+  .copy-box { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-top: 10px; font-size: 13px; color: #333; white-space: pre-wrap; line-height: 1.6; display: none; }
+  .copy-box.show { display: block; }
+
+  .success-msg { color: #38a169; font-size: 13px; text-align: center; margin-top: 6px; display: none; }
+  .success-msg.show { display: block; }
+
+  .last-record { background: #fff8e1; border-radius: 10px; padding: 12px; margin-top: 14px; font-size: 12px; color: #666; }
+  .last-record strong { color: #1a3a5c; }
+
+  .month-hint { text-align: center; font-size: 12px; color: #aaa; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🏠 宜蘭電費結算</h1>
+  <p class="month-hint">每度 6 元，請填入本月抄表度數</p>
+
+  <div class="card">
+    <div class="card-title">📝 請輸入本月末抄表度數</div>
+    <div class="row">
+      <div class="room-label">101</div>
+      <div class="room-input"><input type="number" id="r101" placeholder="度數" inputmode="numeric"></div>
+      <span class="room-unit">度</span>
+    </div>
+    <div class="row">
+      <div class="room-label">102</div>
+      <div class="room-input"><input type="number" id="r102" placeholder="度數" inputmode="numeric"></div>
+      <span class="room-unit">度</span>
+    </div>
+    <div class="row">
+      <div class="room-label">201</div>
+      <div class="room-input"><input type="number" id="r201" placeholder="度數" inputmode="numeric"></div>
+      <span class="room-unit">度</span>
+    </div>
+    <div class="row">
+      <div class="room-label">202</div>
+      <div class="room-input"><input type="number" id="r202" placeholder="度數" inputmode="numeric"></div>
+      <span class="room-unit">度</span>
+    </div>
+    <div class="row">
+      <div class="room-label">301</div>
+      <div class="room-input"><input type="number" id="r301" placeholder="度數" inputmode="numeric"></div>
+      <span class="room-unit">度</span>
+    </div>
+    <div class="row">
+      <div class="room-label">302</div>
+      <div class="room-input"><input type="number" id="r302" placeholder="度數" inputmode="numeric"></div>
+      <span class="room-unit">度</span>
+    </div>
+
+    <div class="last-record" id="lastRecord">
+      上月結算度數參考：<br>
+      <strong>101</strong> 11666 &nbsp;|&nbsp; <strong>102</strong> 7280 &nbsp;|&nbsp; <strong>201</strong> 13871 &nbsp;|&nbsp; <strong>202</strong> 14624 &nbsp;|&nbsp; <strong>301</strong> 18785 &nbsp;|&nbsp; <strong>302</strong> 17232
+    </div>
+  </div>
+
+  <button class="btn btn-primary" onclick="calculate()">⚡ 計算電費</button>
+  <button class="btn btn-secondary" onclick="copyResult()">📋 複製帳單文字</button>
+  <p class="success-msg" id="successMsg">✅ 已複製到剪貼簿！貼到 LINE 群組即可</p>
+
+  <div class="result-card" id="resultCard">
+    <div class="result-title">📊 電費帳單</div>
+    <div id="resultItems"></div>
+    <div class="result-total">
+      <span class="result-total-label">💰 合計</span>
+      <span class="result-total-amount" id="totalAmount"></span>
+    </div>
+    <div class="copy-box" id="copyBox"></div>
+  </div>
+</div>
+
+<script>
+const RATE = 6;
+const LAST_MONTH = { '101': 11666, '102': 7280, '201': 13871, '202': 14624, '301': 18785, '302': 17232 };
+
+function calculate() {
+  const rooms = ['101','102','201','202','301','302'];
+  let total = 0;
+  let billText = `🏠 宜蘭電費帳單\n${new Date().toLocaleDateString('zh-TW')}\n─────────────────\n`;
+  let resultHTML = '';
+
+  let allEmpty = true;
+  for (const r of rooms) {
+    const val = document.getElementById('r'+r).value.trim();
+    if (val) { allEmpty = false; break; }
+  }
+  if (allEmpty) { alert('請至少填入一個房間的度數'); return; }
+
+  for (const r of rooms) {
+    const val = document.getElementById('r'+r).value.trim();
+    if (!val) continue;
+    const current = parseFloat(val);
+    const prev = LAST_MONTH[r];
+    const used = current - prev;
+    const fee = used * RATE;
+    total += fee;
+
+    const usedDisplay = used >= 0 ? used : '▲' + Math.abs(used) + ' (異常)';
+    const feeDisplay = fee >= 0 ? fee : Math.abs(fee) + ' (異常)';
+
+    billText += `房間 ${r}｜用電 ${usedDisplay} 度｜應繳 ${feeDisplay} 元\n`;
+    resultHTML += `
+      <div class="result-item">
+        <span class="result-room">${r}</span>
+        <span class="result-detail">用電 ${usedDisplay} 度 × ${RATE}元</span>
+        <span class="result-amount">${feeDisplay} 元</span>
+      </div>`;
+  }
+
+  billText += `─────────────────\n💰 合計：${total} 元\n`;
+  document.getElementById('resultItems').innerHTML = resultHTML;
+  document.getElementById('totalAmount').textContent = total + ' 元';
+  document.getElementById('copyBox').textContent = billText;
+  document.getElementById('resultCard').classList.add('show');
+  document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function copyResult() {
+  const text = document.getElementById('copyBox').textContent;
+  if (!text) { alert('請先按「計算電費」'); return; }
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('successMsg').classList.add('show');
+    setTimeout(() => document.getElementById('successMsg').classList.remove('show'), 3000);
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    document.getElementById('successMsg').classList.add('show');
+    setTimeout(() => document.getElementById('successMsg').classList.remove('show'), 3000);
+  });
+}
+
+// Enter key navigation
+document.querySelectorAll('input').forEach((input, idx, arr) => {
+  input.addEventListener('enter', () => {
+    if (idx < arr.length - 1) arr[idx + 1].focus();
+    else calculate();
+  });
+});
+</script>
+</body>
 </html>
