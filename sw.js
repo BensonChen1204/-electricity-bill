@@ -1,5 +1,5 @@
-const CACHE_NAME = 'yilan-rental-v2.1.0';
-const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg'];
+const CACHE_NAME = 'yilan-rental-v2.2.0';
+const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg', './cloud-config.js', './cloud-sync.js'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)));
