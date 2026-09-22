@@ -11,6 +11,8 @@
 <link rel="manifest" href="./manifest.webmanifest" />
 <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
 <title>宜蘭租屋小幫手</title>
+<script src="./cloud-config.js"></script>
+<script src="./cloud-sync.js"></script>
 <style>
   :root{
     --bg:#f5f7fb;
@@ -163,7 +165,12 @@
   .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:#172033;color:white;padding:12px 16px;border-radius:999px;font-weight:700;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:20;box-shadow:0 10px 30px rgba(0,0,0,.22);max-width:calc(100% - 32px);text-align:center}
   .toast.show{opacity:1;transform:translate(-50%,0)}
   .data-status{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:14px;color:#8b96a6;font-size:11px}
-  .data-status .status-dot{width:7px;height:7px;border-radius:50%;background:#56a67b}
+  .data-status .status-dot{width:7px;height:7px;border-radius:50%;background:#a8b0bd}
+  .data-status.cloud-ok .status-dot{background:#56a67b}
+  .data-status.cloud-syncing .status-dot{background:#4d83cf;box-shadow:0 0 0 4px rgba(77,131,207,.12)}
+  .data-status.cloud-error .status-dot{background:#d4932d}
+  .cloud-summary{border:1px solid var(--line);background:#f8fbff;border-radius:14px;padding:12px 13px;margin-top:14px;font-size:13px;line-height:1.55;color:#59677a}
+  .cloud-summary strong{color:var(--ink)}
   .settings-menu{display:grid;gap:9px;margin-top:14px}
   .settings-menu button{height:46px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);font-weight:800;text-align:left;padding:0 14px;cursor:pointer}
   .history-list{display:grid;gap:10px;max-height:52vh;overflow:auto;margin-top:14px}
@@ -265,7 +272,7 @@
   </section>
 
   <div class="footnote">完成本月後，本月電表會自動成為下個月的上期度數；歷史資料保留當時的房租、水費與其他費用。</div>
-  <div class="data-status"><span class="status-dot"></span><span id="dataStatus">資料已儲存在此裝置</span><span>·</span><span>v2.1</span></div>
+  <div class="data-status" id="dataStatusWrap"><span class="status-dot"></span><span id="dataStatus">資料已儲存在此裝置</span><span>·</span><span>v2.2</span></div>
 </div>
 
 <dialog id="settingsDialog">
@@ -277,6 +284,7 @@
       <div class="setting"><label>每度電價（元）</label><input id="rateInput" type="number" inputmode="decimal" step="0.1" value="6" /></div>
     </div>
     <div class="settings-menu">
+      <button id="cloudBtn">雲端同步</button>
       <button id="historyBtn">歷史月份</button>
       <button id="exportBackupBtn">匯出資料備份</button>
       <button id="importBackupBtn">匯入資料備份</button>
@@ -339,6 +347,25 @@
   </div>
 </dialog>
 
+<dialog id="cloudDialog">
+  <div class="modal">
+    <h3>雲端同步</h3>
+    <p>同一組家庭密碼可讓你、媽媽與其他授權裝置共用同一份資料。每次修改都會先存本機，再自動同步到雲端。</p>
+    <div class="cloud-summary" id="cloudSummary"><strong>狀態：</strong>尚未連線</div>
+    <div class="settings-grid" style="margin-top:14px">
+      <div class="setting">
+        <label>家庭密碼</label>
+        <input id="cloudPinInput" type="password" inputmode="numeric" autocomplete="current-password" placeholder="請輸入家庭密碼" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="disconnectCloud" style="color:#bb4d55">取消這台裝置連線</button>
+      <button id="closeCloud">關閉</button>
+      <button class="save" id="connectCloud">連線並同步</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="historyDialog">
   <div class="modal">
     <h3>歷史月份</h3>
@@ -355,7 +382,7 @@
 <canvas id="exportCanvas" style="display:none"></canvas>
 
 <script>
-const APP_VERSION='2.1.0';
+const APP_VERSION='2.2.0';
 const STORAGE_KEY='yilanUtilityV2';
 const LEGACY_STORAGE_KEY='yilanUtilityV1';
 const defaultState = {
@@ -372,6 +399,11 @@ const defaultState = {
 };
 let state = normalizeState(loadState());
 let currentOtherRoom = null;
+let cloudReady = false;
+let cloudApplying = false;
+let cloudSaveTimer = null;
+let cloudLastError = '';
+
 
 function clone(v){ return JSON.parse(JSON.stringify(v)); }
 function loadState(){
@@ -399,10 +431,97 @@ function normalizeState(s){
   defaultState.rooms.forEach(d=>{if(!s.rooms.find(r=>r.room===d.room))s.rooms.push(clone(defaultsByRoom[d.room]))});
   return s;
 }
-function saveState(){ state.schemaVersion=2; state.lastSavedAt=new Date().toISOString(); localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); updateDataStatus(); }
+function saveState(){
+  state.schemaVersion=2;
+  state.lastSavedAt=new Date().toISOString();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  updateDataStatus();
+  if(!cloudApplying) scheduleCloudSave();
+}
+function setCloudStatus(mode,text){
+  const el=document.getElementById('dataStatus'), wrap=document.getElementById('dataStatusWrap');
+  if(el) el.textContent=text;
+  if(wrap){
+    wrap.classList.remove('cloud-ok','cloud-syncing','cloud-error');
+    if(mode) wrap.classList.add(mode);
+  }
+  const summary=document.getElementById('cloudSummary');
+  if(summary) summary.innerHTML='<strong>狀態：</strong>'+escapeHtml(text)+(cloudLastError?'<br><span style="color:#a56a12">'+escapeHtml(cloudLastError)+'</span>':'');
+}
 function updateDataStatus(){
-  const el=document.getElementById('dataStatus'); if(!el) return;
-  el.textContent=state.lastSavedAt?'已自動儲存':'資料已儲存在此裝置';
+  if(window.YilanCloud?.enabled?.()){
+    if(window.YilanCloud.getPin()){
+      setCloudStatus(cloudReady?'cloud-ok':'cloud-syncing',cloudReady?'雲端已同步':'雲端同步中');
+    }else setCloudStatus('',state.lastSavedAt?'已存本機 · 尚未連接雲端':'尚未連接雲端');
+  }else{
+    const el=document.getElementById('dataStatus');
+    if(el) el.textContent=state.lastSavedAt?'已自動儲存':'資料已儲存在此裝置';
+  }
+}
+function scheduleCloudSave(){
+  if(!cloudReady || !window.YilanCloud?.enabled?.() || !window.YilanCloud.getPin()) return;
+  clearTimeout(cloudSaveTimer);
+  setCloudStatus('cloud-syncing','正在同步雲端');
+  cloudSaveTimer=setTimeout(cloudSaveNow,700);
+}
+async function cloudSaveNow(){
+  if(!cloudReady || cloudApplying) return;
+  try{
+    const out=await window.YilanCloud.save(state);
+    cloudLastError='';
+    setCloudStatus('cloud-ok','雲端已同步');
+    return out;
+  }catch(e){
+    if(e.status===409){
+      try{
+        const remote=await window.YilanCloud.load();
+        if(remote.exists && remote.payload){
+          cloudApplying=true;
+          state=normalizeState(remote.payload);
+          localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+          cloudApplying=false;
+          render();
+          cloudLastError='另一台裝置剛剛有更新，已載入雲端最新版';
+          setCloudStatus('cloud-error','已載入雲端最新版');
+          toast('另一台裝置已更新，這台已載入最新版');
+          return;
+        }
+      }catch(_){}
+    }
+    cloudLastError=(e.message==='unauthorized'?'家庭密碼不正確':'目前無法同步，資料已保存在本機');
+    setCloudStatus('cloud-error','雲端同步暫停');
+  }
+}
+async function initCloudSync(force=false){
+  if(!window.YilanCloud?.enabled?.()) return;
+  if(!window.YilanCloud.getPin()){
+    cloudReady=false;updateDataStatus();return;
+  }
+  cloudReady=false;cloudLastError='';setCloudStatus('cloud-syncing','正在讀取雲端資料');
+  try{
+    const remote=await window.YilanCloud.load();
+    cloudApplying=true;
+    if(remote.exists && remote.payload){
+      state=normalizeState(remote.payload);
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+    }else{
+      window.YilanCloud.setRevision(0);
+      cloudReady=true;
+      await window.YilanCloud.save(state);
+    }
+    cloudApplying=false;
+    cloudReady=true;
+    cloudLastError='';
+    render();
+    setCloudStatus('cloud-ok','雲端已同步');
+    if(force) toast('雲端同步完成');
+  }catch(e){
+    cloudApplying=false;
+    cloudReady=false;
+    cloudLastError=(e.status===401?'家庭密碼不正確':'連線失敗，仍可使用本機資料');
+    setCloudStatus('cloud-error','雲端尚未連線');
+    if(force) toast(cloudLastError);
+  }
 }
 function money(n){ return Math.round(Number(n)||0).toLocaleString('zh-TW'); }
 function num(n){ return Number(n).toLocaleString('zh-TW',{maximumFractionDigits:2}); }
@@ -753,6 +872,28 @@ document.getElementById('copyImageBtn').onclick=copyImage;
 document.getElementById('settingsBtn').onclick=()=>document.getElementById('settingsDialog').showModal();
 document.getElementById('cancelSettings').onclick=()=>document.getElementById('settingsDialog').close();
 document.getElementById('saveSettings').onclick=()=>{state.month=document.getElementById('monthInput').value||state.month;state.rate=Number(document.getElementById('rateInput').value)||6;saveState();document.getElementById('settingsDialog').close();render();toast('設定已更新')};
+document.getElementById('cloudBtn').onclick=()=>{
+  document.getElementById('settingsDialog').close();
+  document.getElementById('cloudPinInput').value=window.YilanCloud?.getPin?.()||'';
+  updateDataStatus();
+  document.getElementById('cloudDialog').showModal();
+};
+document.getElementById('closeCloud').onclick=()=>document.getElementById('cloudDialog').close();
+document.getElementById('connectCloud').onclick=async()=>{
+  const pin=document.getElementById('cloudPinInput').value.trim();
+  if(!pin){toast('請輸入家庭密碼');return;}
+  window.YilanCloud.setPin(pin);
+  await initCloudSync(true);
+  if(cloudReady) document.getElementById('cloudDialog').close();
+};
+document.getElementById('disconnectCloud').onclick=()=>{
+  if(!confirm('只會取消這台裝置的雲端連線，本機資料不會刪除。確定？')) return;
+  window.YilanCloud.setPin('');
+  window.YilanCloud.setRevision(0);
+  cloudReady=false;cloudLastError='';
+  document.getElementById('cloudPinInput').value='';
+  updateDataStatus();toast('這台裝置已取消雲端連線');
+};
 document.getElementById('historyBtn').onclick=()=>{renderHistory();document.getElementById('settingsDialog').close();document.getElementById('historyDialog').showModal();};
 document.getElementById('closeHistory').onclick=()=>document.getElementById('historyDialog').close();
 document.getElementById('undoLastComplete').onclick=undoLastComplete;
@@ -800,6 +941,9 @@ document.getElementById('confirmComplete').onclick=()=>{
 };
 
 render(); updateDataStatus();
+if(window.YilanCloud?.enabled?.()) initCloudSync(false);
+window.addEventListener('focus',()=>{if(cloudReady)initCloudSync(false);});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&cloudReady)initCloudSync(false);});
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}
 </script>
 </body>
