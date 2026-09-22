@@ -1,0 +1,14 @@
+{
+  "name": "宜蘭租屋小幫手",
+  "short_name": "宜蘭租屋",
+  "description": "宜蘭租屋每月房租、水費、電費與其他費用結算工具",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#f6f8fb",
+  "lang": "zh-TW",
+  "icons": [
+    {"src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}
