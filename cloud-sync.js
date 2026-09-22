@@ -35,7 +35,6 @@ window.YilanCloud = (() => {
     const r = await fetch(config.functionUrl, {
       method,
       headers: {
-        "Authorization": "Bearer " + config.anonKey,
         "apikey": config.anonKey,
         "Content-Type": "application/json",
         "x-family-pin": pin,
