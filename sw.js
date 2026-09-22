@@ -1,4 +1,4 @@
-const CACHE_NAME = 'yilan-rental-v2.0.0';
+const CACHE_NAME = 'yilan-rental-v2.1.0';
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg'];
 
 self.addEventListener('install', event => {
