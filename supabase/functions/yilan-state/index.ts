@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-family-pin",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-family-pin, x-state-id",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Content-Type": "application/json; charset=utf-8",
 };
@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
   const { data: current, error: readError } = await db
     .from("yilan_app_state")
     .select("revision,payload")
-    .eq("id", "main")
+    .eq("id", stateId)
     .maybeSingle();
   if (readError) return reply({ ok: false, error: readError.message }, 500);
 
