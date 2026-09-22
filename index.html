@@ -50,7 +50,8 @@
   .section-title{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:22px 4px 10px}
   .section-title h2{font-size:17px;margin:0;font-weight:800}
   .section-title .meta{font-size:13px;color:var(--muted);text-align:right}
-  .section-action{border:0;background:transparent;color:var(--blue-2);font-weight:800;font-size:13px;padding:8px 0;cursor:pointer;white-space:nowrap}
+  .section-action{border:0;background:transparent;color:var(--blue-2);font-weight:800;font-size:13px;padding:8px 0;cursor:pointer;white-space:nowrap;border-radius:999px}
+  .section-action.needs-setup{background:var(--blue-soft);padding:8px 12px;box-shadow:inset 0 0 0 1px #cfe0f7}
   .rooms{display:grid;gap:12px}
   .room{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:0 6px 18px rgba(30,55,90,.04);transition:.18s ease}
   .room.valid{border-color:#dbe7f7}
@@ -133,6 +134,7 @@
   .tenant-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
   .tenant-actions button{height:44px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:13px;font-weight:850;color:var(--ink);cursor:pointer}
   .tenant-actions .copy-card{background:#172033;border:0;color:#fff}
+  .tenant-actions button:disabled{opacity:.42;cursor:not-allowed;background:#f3f5f8;color:#8f98a7;border-color:#e3e7ed}
   .all-summary{margin-top:12px;background:#172033;color:white;border-radius:20px;padding:16px 18px;display:flex;justify-content:space-between;align-items:center;gap:14px;box-shadow:0 10px 24px rgba(23,32,51,.12)}
   .all-summary span{font-size:13px;color:#c8d2e1}
   .all-summary b{font-size:25px;letter-spacing:-.03em}
@@ -237,7 +239,7 @@
         <tbody id="billBody"></tbody>
       </table>
     </div>
-    <div class="summary"><span>本月六間電費合計</span><b id="totalAmount">$0</b></div>
+    <div class="summary"><span id="billSummaryLabel">本月六間電費合計</span><b id="totalAmount">$0</b></div>
     <div class="actions">
       <button class="action primary" id="copyImageBtn">複製電費表圖片</button>
       <button class="action" id="copyTextBtn">複製文字</button>
@@ -251,7 +253,7 @@
   <p class="settlement-note">房租、水費設定一次後每月沿用；電費自動帶入；「其他」只影響當月，不會帶到下個月。</p>
   <div class="tenant-grid" id="tenantGrid"></div>
   <div class="all-summary">
-    <span>6 間本月應繳合計</span>
+    <span id="grandAllLabel">6 間本月應繳合計</span>
     <b id="grandAll">$0</b>
   </div>
 
@@ -263,7 +265,7 @@
   </section>
 
   <div class="footnote">完成本月後，本月電表會自動成為下個月的上期度數；歷史資料保留當時的房租、水費與其他費用。</div>
-  <div class="data-status"><span class="status-dot"></span><span id="dataStatus">資料已儲存在此裝置</span><span>·</span><span>v2.0</span></div>
+  <div class="data-status"><span class="status-dot"></span><span id="dataStatus">資料已儲存在此裝置</span><span>·</span><span>v2.1</span></div>
 </div>
 
 <dialog id="settingsDialog">
@@ -353,7 +355,7 @@
 <canvas id="exportCanvas" style="display:none"></canvas>
 
 <script>
-const APP_VERSION='2.0.0';
+const APP_VERSION='2.1.0';
 const STORAGE_KEY='yilanUtilityV2';
 const LEGACY_STORAGE_KEY='yilanUtilityV1';
 const defaultState = {
@@ -456,9 +458,16 @@ function sanitizeReading(v){
 }
 function updateProgress(){
   const filled=state.rooms.filter(r=>r.curr!=='').length;
+  const readingsReady=state.rooms.every(r=>calc(r).ok);
+  const billsReady=state.rooms.every(r=>roomReady(r));
+  const fixedReady=state.rooms.every(r=>r.rent!==null && r.water!==null);
   document.getElementById('progressLabel').textContent=`${filled} / 6 已填`;
   document.getElementById('progressBar').style.width=(filled/state.rooms.length*100)+'%';
-  document.getElementById('completeBtn').disabled=!state.rooms.every(r=>roomReady(r));
+  document.getElementById('copyImageBtn').disabled=!readingsReady;
+  document.getElementById('copyTextBtn').disabled=!readingsReady;
+  document.getElementById('completeBtn').disabled=!billsReady;
+  document.getElementById('fixedFeesBtn').classList.toggle('needs-setup',!fixedReady);
+  document.getElementById('fixedFeesBtn').textContent=fixedReady?'設定房租 / 水費':'先設定房租 / 水費';
   const hasMonthEdits=state.rooms.some(r=>r.curr!=='' || (r.others||[]).length>0);
   document.getElementById('resetMonthBtn').disabled=!hasMonthEdits;
 }
@@ -516,21 +525,22 @@ function bindInputs(){
   });
 }
 function renderBill(){
-  const body=document.getElementById('billBody'); body.innerHTML=''; let total=0;
+  const body=document.getElementById('billBody'); body.innerHTML=''; let total=0, readyCount=0;
   state.rooms.forEach(r=>{
-    const c=calc(r); if(c.ok) total+=c.amount;
+    const c=calc(r); if(c.ok){total+=c.amount;readyCount++}
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${r.room}</td><td class="reading-cell">${num(r.prev)}</td><td class="reading-cell">${r.curr!==''?num(r.curr):'—'}</td><td class="amount-cell">${c.ok?money(c.amount):'—'}</td>`;
     body.appendChild(tr);
   });
   document.getElementById('totalAmount').textContent='$'+money(total);
+  document.getElementById('billSummaryLabel').textContent=readyCount===state.rooms.length?'本月六間電費合計':`已填 ${readyCount}/${state.rooms.length} · 目前電費合計`;
 }
 function renderTenantCards(){
   const grid=document.getElementById('tenantGrid'); grid.innerHTML='';
-  let all=0;
+  let all=0, readyCount=0;
   state.rooms.forEach((r,i)=>{
     const c=calc(r);
-    const total=roomTotal(r), ready=roomReady(r); if(ready) all+=total;
+    const total=roomTotal(r), ready=roomReady(r); if(ready){all+=total;readyCount++}
     const card=document.createElement('article');
     card.className='tenant-card';
     const others=(r.others||[]).map((o,oi)=>`
@@ -559,7 +569,9 @@ function renderTenantCards(){
       </div>`;
     grid.appendChild(card);
   });
-  document.getElementById('grandAll').textContent='$'+money(all);
+  const allReady=readyCount===state.rooms.length;
+  document.getElementById('grandAll').textContent=allReady?'$'+money(all):'待完成';
+  document.getElementById('grandAllLabel').textContent=allReady?'6 間本月應繳合計':`已完成 ${readyCount}/${state.rooms.length} 間帳單`;
   bindTenantActions();
 }
 function bindTenantActions(){
