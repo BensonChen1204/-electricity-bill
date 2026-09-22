@@ -4,7 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <meta name="theme-color" content="#f6f8fb" />
-<title>宜蘭水電小幫手</title>
+<meta name="description" content="宜蘭租屋每月水電與房租結算工具" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="宜蘭租屋" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+<title>宜蘭租屋小幫手</title>
 <style>
   :root{
     --bg:#f5f7fb;
@@ -154,6 +160,19 @@
   .other-grid .setting input{text-align:left}
   .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:#172033;color:white;padding:12px 16px;border-radius:999px;font-weight:700;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:20;box-shadow:0 10px 30px rgba(0,0,0,.22);max-width:calc(100% - 32px);text-align:center}
   .toast.show{opacity:1;transform:translate(-50%,0)}
+  .data-status{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:14px;color:#8b96a6;font-size:11px}
+  .data-status .status-dot{width:7px;height:7px;border-radius:50%;background:#56a67b}
+  .settings-menu{display:grid;gap:9px;margin-top:14px}
+  .settings-menu button{height:46px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);font-weight:800;text-align:left;padding:0 14px;cursor:pointer}
+  .settings-menu button.danger-lite{color:var(--danger);background:#fffafa;border-color:#f0d2d5}
+  .history-list{display:grid;gap:10px;max-height:52vh;overflow:auto;margin-top:14px}
+  .history-item{border:1px solid var(--line);border-radius:14px;padding:12px 13px;background:#fbfcfe}
+  .history-top{display:flex;justify-content:space-between;gap:12px;align-items:center}
+  .history-month{font-weight:900;font-size:15px}
+  .history-total{font-weight:900;font-size:18px}
+  .history-meta{margin-top:5px;color:var(--muted);font-size:11px}
+  .empty-history{padding:24px 10px;text-align:center;color:var(--muted);font-size:13px}
+  .ready-note{font-size:11px;color:#8a95a5;margin-top:7px;text-align:right}
 
   @media (min-width:680px){
     .rooms{grid-template-columns:1fr 1fr}
@@ -245,6 +264,7 @@
   </section>
 
   <div class="footnote">完成本月後，本月電表會自動成為下個月的上期度數；歷史資料保留當時的房租、水費與其他費用。</div>
+  <div class="data-status"><span class="status-dot"></span><span id="dataStatus">資料已儲存在此裝置</span><span>·</span><span>v2.0</span></div>
 </div>
 
 <dialog id="settingsDialog">
@@ -255,9 +275,16 @@
       <div class="setting"><label>月份</label><input id="monthInput" type="month" value="2026-10" /></div>
       <div class="setting"><label>每度電價（元）</label><input id="rateInput" type="number" inputmode="decimal" step="0.1" value="6" /></div>
     </div>
+    <div class="settings-menu">
+      <button id="historyBtn">歷史月份</button>
+      <button id="exportBackupBtn">匯出資料備份</button>
+      <button id="importBackupBtn">匯入資料備份</button>
+      <button id="installAppBtn" style="display:none">安裝到手機主畫面</button>
+    </div>
+    <input id="importBackupFile" type="file" accept="application/json,.json" hidden />
     <div class="modal-actions">
       <button id="cancelSettings">取消</button>
-      <button class="save" id="saveSettings">儲存</button>
+      <button class="save" id="saveSettings">儲存基本設定</button>
     </div>
   </div>
 </dialog>
@@ -280,7 +307,7 @@
     <p>只計入本月。可以輸入冷氣清潔、鑰匙、停車、補差額等臨時項目。</p>
     <div class="other-grid">
       <div class="setting"><label>項目名稱</label><input id="otherName" type="text" placeholder="例如：冷氣清潔" maxlength="24" /></div>
-      <div class="setting"><label>金額（元）</label><input id="otherAmount" type="number" inputmode="numeric" min="0" step="1" placeholder="0" /></div>
+      <div class="setting"><label>金額（元）</label><input id="otherAmount" type="number" inputmode="numeric" step="1" placeholder="可正可負，例如 800 或 -500" /></div>
     </div>
     <div class="modal-actions">
       <button id="cancelOther">取消</button>
@@ -311,12 +338,27 @@
   </div>
 </dialog>
 
+<dialog id="historyDialog">
+  <div class="modal">
+    <h3>歷史月份</h3>
+    <p>每次按「完成本月」都會保留當時的房租、水費、電費與其他費用。</p>
+    <div class="history-list" id="historyList"></div>
+    <div class="modal-actions">
+      <button id="closeHistory">關閉</button>
+      <button class="save" id="undoLastComplete" style="background:#6b778a">撤銷上次完成</button>
+    </div>
+  </div>
+</dialog>
+
 <div class="toast" id="toast">已完成</div>
 <canvas id="exportCanvas" style="display:none"></canvas>
 
 <script>
+const APP_VERSION='2.0.0';
+const STORAGE_KEY='yilanUtilityV2';
+const LEGACY_STORAGE_KEY='yilanUtilityV1';
 const defaultState = {
-  month:'2026-10', rate:6,
+  schemaVersion:2, month:'2026-10', rate:6,
   rooms:[
     {room:'101', prev:13009, curr:'', rent:null, water:null, others:[]},
     {room:'102', prev:7568, curr:'', rent:null, water:null, others:[]},
@@ -332,10 +374,15 @@ let currentOtherRoom = null;
 
 function clone(v){ return JSON.parse(JSON.stringify(v)); }
 function loadState(){
-  try{const x=JSON.parse(localStorage.getItem('yilanUtilityV1')); return x||clone(defaultState)}catch(e){return clone(defaultState)}
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+    const x=raw?JSON.parse(raw):null;
+    return x||clone(defaultState);
+  }catch(e){return clone(defaultState)}
 }
 function normalizeState(s){
   if(!s || !Array.isArray(s.rooms)) s=clone(defaultState);
+  s.schemaVersion=2;
   s.month=s.month||defaultState.month;
   s.rate=Number(s.rate)||6;
   s.history=Array.isArray(s.history)?s.history:[];
@@ -351,7 +398,11 @@ function normalizeState(s){
   defaultState.rooms.forEach(d=>{if(!s.rooms.find(r=>r.room===d.room))s.rooms.push(clone(defaultsByRoom[d.room]))});
   return s;
 }
-function saveState(){ localStorage.setItem('yilanUtilityV1', JSON.stringify(state)); }
+function saveState(){ state.schemaVersion=2; state.lastSavedAt=new Date().toISOString(); localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); updateDataStatus(); }
+function updateDataStatus(){
+  const el=document.getElementById('dataStatus'); if(!el) return;
+  el.textContent=state.lastSavedAt?'已自動儲存':'資料已儲存在此裝置';
+}
 function money(n){ return Math.round(Number(n)||0).toLocaleString('zh-TW'); }
 function num(n){ return Number(n).toLocaleString('zh-TW',{maximumFractionDigits:2}); }
 function monthLabel(m){const [y,mm]=m.split('-').map(Number);return `${y} 年 ${mm} 月`;}
@@ -368,6 +419,7 @@ function roomTotal(r){
   const other=(r.others||[]).reduce((a,o)=>a+(Number(o.amount)||0),0);
   return rent+water+(c.ok?c.amount:0)+other;
 }
+function roomReady(r){ return r.rent!==null && r.water!==null && calc(r).ok; }
 function fixedLabel(v){ return v===null?'尚未設定':'$'+money(v); }
 function render(){
   document.getElementById('monthTitle').textContent=monthLabel(state.month);
@@ -407,7 +459,7 @@ function updateProgress(){
   const filled=state.rooms.filter(r=>r.curr!=='').length;
   document.getElementById('progressLabel').textContent=`${filled} / 6 已填`;
   document.getElementById('progressBar').style.width=(filled/state.rooms.length*100)+'%';
-  document.getElementById('completeBtn').disabled=!state.rooms.every(r=>calc(r).ok);
+  document.getElementById('completeBtn').disabled=!state.rooms.every(r=>roomReady(r));
   const hasMonthEdits=state.rooms.some(r=>r.curr!=='' || (r.others||[]).length>0);
   document.getElementById('resetMonthBtn').disabled=!hasMonthEdits;
 }
@@ -479,7 +531,7 @@ function renderTenantCards(){
   let all=0;
   state.rooms.forEach((r,i)=>{
     const c=calc(r);
-    const total=roomTotal(r); all+=total;
+    const total=roomTotal(r), ready=roomReady(r); if(ready) all+=total;
     const card=document.createElement('article');
     card.className='tenant-card';
     const others=(r.others||[]).map((o,oi)=>`
@@ -501,7 +553,246 @@ function renderTenantCards(){
         <button class="add-other" data-other-room="${i}">＋ 新增其他費用</button>
       </div>
       <div class="electric-detail"><span>電表 ${num(r.prev)} → ${r.curr!==''?num(r.curr):'—'}</span><span>${c.ok?num(c.usage)+' 度':'尚未完成'}</span></div>
-      <div class="grand"><div class="grand-label">本月應繳</div><div class="grand-amount">$${money(total)}</div></div>
+      <div class="grand"><div class="grand-label">本月應繳</div><div class="grand-amount">${ready?'
+      <div class="tenant-actions">
+        <button data-copy-text-room="${i}" ${ready?'':'disabled'}>複製文字</button>
+        <button class="copy-card" data-copy-card-room="${i}" ${ready?'':'disabled'}>複製帳單</button>
+      </div>`;
+    grid.appendChild(card);
+  });
+  document.getElementById('grandAll').textContent='$'+money(all);
+  bindTenantActions();
+}
+function bindTenantActions(){
+  document.querySelectorAll('[data-other-room]').forEach(btn=>btn.onclick=()=>openOther(+btn.dataset.otherRoom));
+  document.querySelectorAll('[data-remove-room]').forEach(btn=>btn.onclick=()=>{
+    const ri=+btn.dataset.removeRoom, oi=+btn.dataset.removeOther;
+    state.rooms[ri].others.splice(oi,1); saveState(); renderTenantCards(); updateProgress(); toast('已刪除其他費用');
+  });
+  document.querySelectorAll('[data-copy-text-room]').forEach(btn=>btn.onclick=()=>copyTenantText(+btn.dataset.copyTextRoom));
+  document.querySelectorAll('[data-copy-card-room]').forEach(btn=>btn.onclick=()=>copyTenantCard(+btn.dataset.copyCardRoom));
+  document.querySelectorAll('.edit-fixed-one').forEach(btn=>btn.onclick=()=>{openFixed(); setTimeout(()=>{const input=document.querySelector(`[data-fixed-rent="${btn.dataset.roomI}"]`); if(input) input.focus();},80)});
+}
+function openFixed(){
+  const grid=document.getElementById('fixedGrid'); grid.innerHTML='';
+  state.rooms.forEach((r,i)=>{
+    const row=document.createElement('div'); row.className='fixed-row';
+    row.innerHTML=`<div class="fixed-room">${r.room}</div>
+      <label>房租<input data-fixed-rent="${i}" type="number" inputmode="numeric" min="0" step="1" value="${r.rent===null?'':r.rent}" placeholder="未設定"></label>
+      <label>水費<input data-fixed-water="${i}" type="number" inputmode="numeric" min="0" step="1" value="${r.water===null?'':r.water}" placeholder="未設定"></label>`;
+    grid.appendChild(row);
+  });
+  document.getElementById('fixedFeesDialog').showModal();
+}
+function openOther(i){
+  currentOtherRoom=i;
+  document.getElementById('otherTitle').textContent=`${state.rooms[i].room}｜新增其他費用`;
+  document.getElementById('otherName').value='';
+  document.getElementById('otherAmount').value='';
+  document.getElementById('otherDialog').showModal();
+  setTimeout(()=>document.getElementById('otherName').focus(),80);
+}
+function saveOther(){
+  const name=document.getElementById('otherName').value.trim();
+  const amount=Number(document.getElementById('otherAmount').value);
+  if(currentOtherRoom===null || !name || !Number.isFinite(amount)){toast('請輸入項目名稱與金額');return;}
+  state.rooms[currentOtherRoom].others.push({name,amount:Math.round(amount)});
+  saveState(); document.getElementById('otherDialog').close(); renderTenantCards(); updateProgress(); toast('已加入本月其他費用');
+}
+function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function textBill(){
+  const lines=[`宜蘭電費｜${monthLabel(state.month)}`,''];
+  state.rooms.forEach(r=>{const c=calc(r); lines.push(`${r.room}｜上月 ${num(r.prev)}｜本月 ${r.curr!==''?num(r.curr):'—'}｜金額 ${c.ok?'$'+money(c.amount):'—'}`)});
+  return lines.join('\n');
+}
+function tenantText(i){
+  const r=state.rooms[i], c=calc(r);
+  if(!roomReady(r)) return '';
+  const lines=[`【${monthLabel(state.month)}｜${r.room}】`,'',`房租：${r.rent===null?'尚未設定':money(r.rent)+' 元'}`,`水費：${r.water===null?'尚未設定':money(r.water)+' 元'}`,`電費：${c.ok?money(c.amount)+' 元':'尚未抄表'}`];
+  (r.others||[]).forEach(o=>lines.push(`${o.name}：${money(o.amount)} 元`));
+  lines.push('',`本月應繳：${money(roomTotal(r))} 元`,'',`電表：${num(r.prev)} → ${r.curr!==''?num(r.curr):'—'}${c.ok?`（${num(c.usage)} 度）`:''}`);
+  return lines.join('\n');
+}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)}
+async function copyText(){try{await navigator.clipboard.writeText(textBill());toast('已複製電費表文字，可貼到 LINE')}catch(e){toast('瀏覽器限制，請手動複製')}}
+async function copyTenantText(i){const t=tenantText(i);if(!t){toast('請先完成抄表並設定房租、水費');return;}try{await navigator.clipboard.writeText(t);toast(`已複製 ${state.rooms[i].room} 帳單文字`)}catch(e){toast('瀏覽器限制，請手動複製')}}
+
+function drawBill(){
+  const canvas=document.getElementById('exportCanvas');
+  const dpr=2, w=900, rowH=82, top=170, h=top+state.rooms.length*rowH+84;
+  canvas.width=w*dpr;canvas.height=h*dpr;canvas.style.width=w+'px';canvas.style.height=h+'px';
+  const ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#27364f';ctx.font='700 34px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText(`宜蘭電費  ${monthLabel(state.month)}`,48,62);
+  ctx.fillStyle='#6f7c90';ctx.font='500 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText(`電價 ${state.rate} 元 / 度`,48,96);
+  const x=48, y=124, col=[130,220,220,234], tw=col.reduce((a,b)=>a+b,0);
+  ctx.fillStyle='#4d83cf';roundRect(ctx,x,y,tw,54,14,true,false);
+  ctx.fillStyle='#fff';ctx.font='700 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+  ctx.textAlign='left';ctx.fillText('房號',x+18,y+34);
+  ctx.textAlign='center';ctx.fillText('上月抄表',x+col[0]+col[1]/2,y+34);
+  ctx.fillText('本月抄表',x+col[0]+col[1]+col[2]/2,y+34);
+  ctx.textAlign='right';ctx.fillText('金額',x+tw-18,y+34);
+  let cy=y+54;
+  state.rooms.forEach((r,idx)=>{
+    const c=calc(r);
+    ctx.fillStyle=idx%2?'#fbfdff':'#ffffff';ctx.fillRect(x,cy,tw,rowH);
+    ctx.strokeStyle='#dfe7f1';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,cy);ctx.lineTo(x+tw,cy);ctx.stroke();
+    ctx.fillStyle='#172033';ctx.textAlign='left';ctx.font='800 24px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText(r.room,x+18,cy+50);
+    ctx.fillStyle='#667287';ctx.textAlign='center';ctx.font='650 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+    ctx.fillText(num(r.prev),x+col[0]+col[1]/2,cy+50);
+    ctx.fillText(r.curr!==''?num(r.curr):'—',x+col[0]+col[1]+col[2]/2,cy+50);
+    ctx.fillStyle='#172033';ctx.textAlign='right';ctx.font='900 29px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText(c.ok?money(c.amount):'—',x+tw-18,cy+52);
+    cy+=rowH;
+  });
+  ctx.strokeStyle='#cbd8e8';ctx.lineWidth=2;ctx.strokeRect(x,y,tw,54+state.rooms.length*rowH);
+  return canvas;
+}
+function drawTenantCard(i){
+  const r=state.rooms[i], c=calc(r), others=r.others||[];
+  if(!roomReady(r)){toast('請先完成抄表並設定房租、水費');return null;}
+  const dpr=2,w=760,baseH=450,extraH=others.length*44,h=baseH+extraH;
+  const canvas=document.getElementById('exportCanvas');canvas.width=w*dpr;canvas.height=h*dpr;canvas.style.width=w+'px';canvas.style.height=h+'px';
+  const ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle='#f7f9fc';ctx.fillRect(0,0,w,h);
+  const x=44,y=42,cw=w-88,ch=h-84;
+  ctx.fillStyle='#ffffff';roundRect(ctx,x,y,cw,ch,26,true,false);
+  ctx.fillStyle='#4d83cf';roundRect(ctx,x,y,8,ch,4,true,false);
+  ctx.fillStyle='#172033';ctx.textAlign='left';ctx.font='900 36px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText(r.room,x+32,y+56);
+  ctx.fillStyle='#7a8596';ctx.font='700 17px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText(monthLabel(state.month),x+32,y+86);
+  let cy=y+132;
+  const line=(name,value,strong=false)=>{
+    ctx.fillStyle=strong?'#3c5578':'#697487';ctx.font=(strong?'700 ':'500 ')+ '19px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.textAlign='left';ctx.fillText(name,x+32,cy);
+    ctx.fillStyle='#1e2c41';ctx.font=(strong?'900 ':'750 ')+ (strong?'23px':'20px')+' -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.textAlign='right';ctx.fillText(value,x+cw-32,cy);cy+=44;
+  };
+  line('房租',r.rent===null?'尚未設定':'$'+money(r.rent));
+  line('水費',r.water===null?'尚未設定':'$'+money(r.water));
+  line('電費',c.ok?'$'+money(c.amount):'待抄表',true);
+  others.forEach(o=>line(o.name,'$'+money(o.amount)));
+  ctx.strokeStyle='#e2e8f0';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x+32,cy-8);ctx.lineTo(x+cw-32,cy-8);ctx.stroke();
+  cy+=34;
+  ctx.fillStyle='#7a8596';ctx.textAlign='left';ctx.font='700 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText('本月應繳',x+32,cy);
+  ctx.fillStyle='#15233a';ctx.textAlign='right';ctx.font='950 42px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText('$'+money(roomTotal(r)),x+cw-32,cy+4);
+  cy+=58;
+  ctx.fillStyle='#8590a1';ctx.textAlign='left';ctx.font='500 16px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';ctx.fillText(`電表 ${num(r.prev)} → ${r.curr!==''?num(r.curr):'—'}${c.ok?`　${num(c.usage)} 度`:''}`,x+32,cy);
+  return canvas;
+}
+function roundRect(ctx,x,y,w,h,r,fill,stroke){if(w<2*r)r=w/2;if(h<2*r)r=h/2;ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();if(fill)ctx.fill();if(stroke)ctx.stroke();}
+async function copyCanvas(canvas,filename,success){
+  canvas.toBlob(async blob=>{
+    try{
+      if(navigator.clipboard && window.ClipboardItem){await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);toast(success);}
+      else{downloadBlob(blob,filename);toast('瀏覽器不支援直接複製，已改為儲存圖片');}
+    }catch(e){downloadBlob(blob,filename);toast('已改為儲存圖片');}
+  },'image/png');
+}
+function copyImage(){copyCanvas(drawBill(),`宜蘭電費_${state.month}.png`,'已複製電費表圖片，可貼到 LINE');}
+function copyTenantCard(i){const c=drawTenantCard(i);if(c)copyCanvas(c,`${state.rooms[i].room}_${state.month}_帳單.png`,`已複製 ${state.rooms[i].room} 帳單圖片`);}
+function downloadBlob(blob,filename){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+
+function renderHistory(){
+  const list=document.getElementById('historyList');
+  const rows=[...(state.history||[])].reverse();
+  if(!rows.length){list.innerHTML='<div class="empty-history">還沒有已完成的月份</div>';document.getElementById('undoLastComplete').disabled=true;return;}
+  list.innerHTML=rows.map(rec=>{
+    const total=(rec.rooms||[]).reduce((a,r)=>a+(Number(r.total)||0),0);
+    const when=rec.completedAt?new Date(rec.completedAt).toLocaleString('zh-TW',{dateStyle:'short',timeStyle:'short'}):'';
+    return `<div class="history-item"><div class="history-top"><div class="history-month">${monthLabel(rec.month)}</div><div class="history-total">${money(total)}</div></div><div class="history-meta">${rec.rooms?.length||0} 間 · 電價 ${rec.rate} 元/度${when?' · '+when:''}</div></div>`;
+  }).join('');
+  document.getElementById('undoLastComplete').disabled=false;
+}
+function undoLastComplete(){
+  if(!(state.history||[]).length){toast('沒有可撤銷的月份');return;}
+  const rec=state.history[state.history.length-1];
+  if(!confirm(`要撤銷 ${monthLabel(rec.month)} 的「完成本月」嗎？\n\n會回到該月份最後完成時的內容，讓你重新修改。`)) return;
+  state.history.pop();
+  state.month=rec.month; state.rate=Number(rec.rate)||state.rate;
+  state.rooms=(rec.rooms||[]).map(r=>({room:String(r.room),prev:Number(r.prev)||0,curr:r.curr===undefined||r.curr===null?'':String(r.curr),rent:r.rent===null||r.rent===undefined?null:Number(r.rent),water:r.water===null||r.water===undefined?null:Number(r.water),others:clone(r.others||[])}));
+  state=normalizeState(state); saveState(); render(); renderHistory(); toast('已撤銷上次完成，可重新修改');
+}
+function exportBackup(){
+  const payload={app:'宜蘭租屋小幫手',version:APP_VERSION,exportedAt:new Date().toISOString(),state};
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  downloadBlob(blob,`宜蘭租屋備份_${state.month}_${new Date().toISOString().slice(0,10)}.json`);
+  toast('備份檔已匯出');
+}
+function importBackupFile(file){
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const parsed=JSON.parse(reader.result); const incoming=parsed.state||parsed;
+      if(!incoming || !Array.isArray(incoming.rooms)) throw new Error('invalid');
+      if(!confirm('匯入備份會覆蓋目前這台裝置上的資料。確定繼續？')) return;
+      state=normalizeState(incoming); saveState(); render(); document.getElementById('settingsDialog').close(); toast('備份已匯入');
+    }catch(e){toast('備份檔格式不正確');}
+  };
+  reader.readAsText(file);
+}
+let deferredInstallPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;document.getElementById('installAppBtn').style.display='block';});
+async function installApp(){
+  if(!deferredInstallPrompt){toast('請使用瀏覽器「加入主畫面」功能');return;}
+  deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt=null; document.getElementById('installAppBtn').style.display='none';
+}
+
+function nextMonth(m){let [y,mm]=m.split('-').map(Number);mm++;if(mm===13){mm=1;y++}return `${y}-${String(mm).padStart(2,'0')}`}
+
+document.getElementById('copyTextBtn').onclick=copyText;
+document.getElementById('copyImageBtn').onclick=copyImage;
+document.getElementById('settingsBtn').onclick=()=>document.getElementById('settingsDialog').showModal();
+document.getElementById('cancelSettings').onclick=()=>document.getElementById('settingsDialog').close();
+document.getElementById('saveSettings').onclick=()=>{state.month=document.getElementById('monthInput').value||state.month;state.rate=Number(document.getElementById('rateInput').value)||6;saveState();document.getElementById('settingsDialog').close();render();toast('設定已更新')};
+document.getElementById('historyBtn').onclick=()=>{renderHistory();document.getElementById('settingsDialog').close();document.getElementById('historyDialog').showModal();};
+document.getElementById('closeHistory').onclick=()=>document.getElementById('historyDialog').close();
+document.getElementById('undoLastComplete').onclick=undoLastComplete;
+document.getElementById('exportBackupBtn').onclick=exportBackup;
+document.getElementById('importBackupBtn').onclick=()=>document.getElementById('importBackupFile').click();
+document.getElementById('importBackupFile').onchange=e=>{importBackupFile(e.target.files[0]);e.target.value='';};
+document.getElementById('installAppBtn').onclick=installApp;
+
+document.getElementById('fixedFeesBtn').onclick=openFixed;
+document.getElementById('cancelFixed').onclick=()=>document.getElementById('fixedFeesDialog').close();
+document.getElementById('saveFixed').onclick=()=>{
+  state.rooms.forEach((r,i)=>{
+    const rentEl=document.querySelector(`[data-fixed-rent="${i}"]`), waterEl=document.querySelector(`[data-fixed-water="${i}"]`);
+    r.rent=rentEl.value===''?null:Math.max(0,Math.round(Number(rentEl.value)||0));
+    r.water=waterEl.value===''?null:Math.max(0,Math.round(Number(waterEl.value)||0));
+  });
+  saveState();document.getElementById('fixedFeesDialog').close();renderTenantCards();updateProgress();toast('房租與水費已儲存');
+};
+
+document.getElementById('cancelOther').onclick=()=>document.getElementById('otherDialog').close();
+document.getElementById('saveOther').onclick=saveOther;
+
+document.getElementById('resetMonthBtn').onclick=()=>document.getElementById('resetMonthDialog').showModal();
+document.getElementById('cancelResetMonth').onclick=()=>document.getElementById('resetMonthDialog').close();
+document.getElementById('confirmResetMonth').onclick=()=>{
+  state.rooms=state.rooms.map(r=>({...r,curr:'',others:[]}));
+  saveState();
+  document.getElementById('resetMonthDialog').close();
+  render();
+  toast('本月已還原，可重新輸入');
+  window.scrollTo({top:0,behavior:'smooth'});
+};
+
+document.getElementById('completeBtn').onclick=()=>document.getElementById('completeDialog').showModal();
+document.getElementById('cancelComplete').onclick=()=>document.getElementById('completeDialog').close();
+document.getElementById('confirmComplete').onclick=()=>{
+  const record={
+    month:state.month,rate:state.rate,
+    rooms:state.rooms.map(r=>({room:r.room,prev:r.prev,curr:r.curr,rent:r.rent,water:r.water,others:clone(r.others),...calc(r),total:roomTotal(r)})),
+    completedAt:new Date().toISOString()
+  };
+  state.history=state.history||[];state.history.push(record);
+  state.rooms=state.rooms.map(r=>({room:r.room,prev:Number(r.curr),curr:'',rent:r.rent,water:r.water,others:[]}));
+  state.month=nextMonth(state.month);saveState();document.getElementById('completeDialog').close();render();toast('已完成：電表帶到下月，其他費用已清空');window.scrollTo({top:0,behavior:'smooth'});
+};
+
+render(); updateDataStatus();
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}
+</script>
+</body>
+</html>+money(total):'待完成'}</div></div><div class="ready-note">${ready?'已可傳送帳單':'請先完成抄表並設定房租、水費'}</div>
       <div class="tenant-actions">
         <button data-copy-text-room="${i}">複製文字</button>
         <button class="copy-card" data-copy-card-room="${i}">複製帳單</button>
