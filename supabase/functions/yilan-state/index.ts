@@ -20,21 +20,28 @@ async function sha256Hex(input: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
-  const expectedHash = Deno.env.get("YILAN_FAMILY_PIN_SHA256") || "";
-  const pin = req.headers.get("x-family-pin") || "";
-  if (!expectedHash || !pin || (await sha256Hex(pin)) !== expectedHash) {
-    return reply({ ok: false, error: "unauthorized" }, 401);
-  }
-
   const url = Deno.env.get("SUPABASE_URL")!;
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const db = createClient(url, serviceRole, { auth: { persistSession: false } });
+
+  const pin = req.headers.get("x-family-pin") || "";
+  const { data: cfg, error: cfgError } = await db
+    .from("yilan_app_config")
+    .select("pin_sha256")
+    .eq("id", "main")
+    .maybeSingle();
+  if (cfgError) return reply({ ok: false, error: cfgError.message }, 500);
+  if (!cfg?.pin_sha256 || !pin || (await sha256Hex(pin)) !== cfg.pin_sha256) {
+    return reply({ ok: false, error: "unauthorized" }, 401);
+  }
+
+  const stateId = (req.headers.get("x-state-id") || "main").slice(0, 80);
 
   if (req.method === "GET") {
     const { data, error } = await db
       .from("yilan_app_state")
       .select("revision,payload,updated_at,updated_by")
-      .eq("id", "main")
+      .eq("id", stateId)
       .maybeSingle();
     if (error) return reply({ ok: false, error: error.message }, 500);
     return reply({ ok: true, exists: !!data, ...(data || {}) });
@@ -63,7 +70,7 @@ Deno.serve(async (req) => {
 
   if (current) {
     const { error: histError } = await db.from("yilan_app_state_history").insert({
-      state_id: "main",
+      state_id: stateId,
       revision: current.revision,
       payload: current.payload,
       changed_by: actor,
@@ -74,7 +81,7 @@ Deno.serve(async (req) => {
   const { data: saved, error: saveError } = await db
     .from("yilan_app_state")
     .upsert({
-      id: "main",
+      id: stateId,
       revision: nextRevision,
       payload: body.payload,
       updated_at: new Date().toISOString(),
