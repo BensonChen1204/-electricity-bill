@@ -1,5 +1,6 @@
-// Public Supabase client configuration for Yilan Rental Helper.
+// Public endpoint only. The household's private link key stays in its browser.
 window.YILAN_CLOUD_CONFIG = {
-  functionUrl: "https://njmxpieecvykcpmexxbi.supabase.co/functions/v1/yilan-state",
-  anonKey: "sb_publishable_5jcGxRbYOQG5430LCc92tA_p8RvnsbU"
+  protocol: "worker-v1",
+  authMode: "capability-v1",
+  functionUrl: "https://yilan-sync-v3.neihu0122.workers.dev/v1/state"
 };

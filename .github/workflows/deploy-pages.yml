@@ -28,10 +28,15 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      - name: Prepare static app only
+        run: |
+          mkdir _site
+          cp index.html electricity_bill.html cloud-config.js cloud-sync.js sync-engine.js sw.js favicon.svg manifest.webmanifest _site/
+
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: .
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment

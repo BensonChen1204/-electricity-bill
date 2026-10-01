@@ -1,0 +1,22 @@
+{
+  "name": "yilan-sync-v3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.3",
+    "miniflare": "5.20260930.0-alpha",
+    "playwright": "1.63.0",
+    "typescript": "7.0.2",
+    "wrangler": "4.145.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

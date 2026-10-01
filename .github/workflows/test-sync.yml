@@ -1,0 +1,35 @@
+name: Test sync safety
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run check
+        working-directory: backend
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+      - run: node --test tests/*.test.cjs
+      - name: Install browser for synthetic UI checks
+        run: npx playwright install --with-deps chromium
+        working-directory: backend
+      - name: Exercise mobile UI and offline PWA
+        run: node tests/ui-smoke.cjs
+        env:
+          NODE_PATH: ${{ github.workspace }}/backend/node_modules
+      - name: Exercise private-link setup with synthetic local data
+        run: node tests/setup-smoke.cjs
+        env:
+          NODE_PATH: ${{ github.workspace }}/backend/node_modules

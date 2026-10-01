@@ -20,9 +20,12 @@
 
 ## 資料策略
 
-目前採 local-first：資料存在使用裝置瀏覽器的 localStorage，並提供 JSON 匯出備份與還原。
+採 local-first：先保留本機資料，再核對雲端版本；提供 JSON 匯出與還原。
+新版同步會在資料遷移或套用雲端版本前保存復原備份，遇到不同版本時先保留兩份，等使用者選擇。
 
-若未來需要跨手機同步，可再接雲端資料層；現有資料結構已保留升級空間。
+Cloudflare Worker + D1 重建程式位於 `backend/`，採用家庭專屬連結，授權家人點開即可使用，不需輸入密碼。
+`cloud-config.js` 指向新的 Cloudflare 同步 API。原 Supabase 與舊 Worker 保留供回復；不要清除手機本機資料。
+測試指令、基線匯入、安全設定、切換與回復步驟請看 [遷移清單](CLOUDFLARE_MIGRATION.md)。
 
 ## 部署
 
