@@ -1,12 +1,11 @@
 # Cloudflare sync v3: review and cutover checklist
 
-The new isolated Worker and D1 have been provisioned. The checked-in
-`cloud-config.js` still points at the existing Supabase service. No existing
-Worker is changed. The new endpoint is
-`https://yilan-sync-v3.neihu0122.workers.dev/v1/state`; it fails closed until the
-user configures its required secret. Do not switch the frontend before the gates
-below. All tests, including the synthetic Chromium mobile/PWA smoke, passed in
-[CI](https://github.com/BensonChen1204/-electricity-bill/actions/runs/36802611663).
+The new isolated Worker and D1 are provisioned. The owner has completed the
+private-link connection check. This release switches the frontend to the new
+endpoint `https://yilan-sync-v3.neihu0122.workers.dev/v1/state` using capability
+access. The old Worker and Supabase remain untouched for rollback. Never share
+an actual private link in this repository. The tests below cover only synthetic
+capabilities; final acceptance includes the real family phones.
 
 ## What changes
 

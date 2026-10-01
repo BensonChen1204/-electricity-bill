@@ -14,9 +14,9 @@ export function setupPage(nonce: string): string {
 <button id="copyVerifier" disabled>複製驗證值</button>
 <a class="action secondary" id="dashboard" href="https://dash.cloudflare.com/b979a664c9799de33d5e367e776dc0b9/workers/services/view/yilan-sync-v3/production/settings" target="_blank" rel="noopener noreferrer">開啟新 Worker 設定</a>
 <button id="verify" disabled>設定好了，檢查連線</button>
+<p id="status" class="status" role="status" aria-live="polite">尚未建立私人連結</p>
 <h2>3. 由你把連結傳給媽媽</h2><p>連線檢查成功，而且新 App 已完成上線後，再傳給媽媽。若手機舊資料不同，App 會保留兩份等家人核對，避免覆蓋。</p>
 <button id="copyLink" disabled>複製私人連結</button><button id="shareLink" disabled>分享私人連結</button>
-<p id="status" class="status" role="status" aria-live="polite">尚未建立私人連結</p>
 <p><small>鑰匙遺失或連結外流：重新建立並更換 Cloudflare 驗證值，舊連結會立刻失效，再由你重新分享。不要把原始鑰匙或連結貼進 Cloudflare。</small></p>
 <button id="forget" class="secondary" disabled>完成後清除此分頁的鑰匙</button></main>
 <script nonce="${nonce}">
@@ -31,6 +31,7 @@ export function setupPage(nonce: string): string {
     el('generate').disabled=busy;
     el('generate').textContent=token?'重新建立（更換後舊連結將失效）':'建立私人連結';
     el('copyVerifier').disabled=!token||busy;el('verify').disabled=!token||busy;
+    el('verify').textContent=verified?'連線驗證成功 ✓':busy?'正在處理…':'設定好了，檢查連線';
     el('copyLink').disabled=!verified||busy;el('shareLink').disabled=!verified||busy;
     el('forget').disabled=!token||busy;
     el('generatedNote').textContent=token?'這個分頁已保存一把本機鑰匙；頁面不會顯示完整鑰匙。':'尚未建立。鑰匙只暫存在目前分頁，關閉前請自行保存私人連結。';
@@ -66,7 +67,7 @@ export function setupPage(nonce: string): string {
       if(!data.exists||!data.payload||!Array.isArray(data.payload.rooms)||data.payload.rooms.length!==6){status('驗證已通過，但家庭基準資料尚未準備好，請先不要分享。');return;}
       verified=true;status('連線驗證成功，家庭資料已就緒。請告知助理「連線檢查成功」，等新 App 上線完成後，再由你分享私人連結給媽媽。');
     }catch(_){status('目前無法完成連線檢查。鑰匙仍保留於這個分頁，請稍後重試。');}
-    finally{clearTimeout(timeout);busy=false;update();}
+    finally{clearTimeout(timeout);busy=false;update();el('status').scrollIntoView?.({behavior:'smooth',block:'center'});}
   };
   el('copyLink').onclick=()=>{if(verified&&!busy)copy(link(),'私人連結已複製。請只由你本人傳給媽媽或授權家人。');};
   el('shareLink').onclick=async()=>{if(!verified||busy)return;if(!navigator.share){await copy(link(),'私人連結已複製，請只分享給授權家人。');return;}try{await navigator.share({title:'家庭帳單',text:'請保留這條私人連結，不要轉傳。',url:link()});status('已開啟分享，請確認你選擇的是授權家人。');}catch(_){status('分享已取消。你仍可自行複製私人連結。');}};

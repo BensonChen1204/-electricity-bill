@@ -31,6 +31,8 @@ const server = http.createServer(async(req,res)=>{
     await context.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort());
     const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(base+'/setup');
+    assert.equal(await page.locator('#verify').evaluate(el=>el.nextElementSibling.id),'status');
+    assert.equal(await page.locator('#status').getAttribute('aria-live'),'polite');
     assert.equal(requests,0);assert.equal(await page.locator('#copyLink').isEnabled(),false);
     await page.locator('#generate').click();await page.waitForFunction(()=>!document.getElementById('copyVerifier').disabled);
     assert.equal(requests,0,'generation is client-only');
@@ -40,6 +42,7 @@ const server = http.createServer(async(req,res)=>{
     expectedVerifier=await page.evaluate(()=>navigator.clipboard.readText());
     assert.match(expectedVerifier,/^[a-f0-9]{64}$/);
     await page.locator('#verify').click();await page.waitForFunction(()=>document.getElementById('status').textContent.includes('連線驗證成功'));
+    assert.ok((await page.locator('#verify').innerText()).includes('連線驗證成功'));
     await page.locator('#copyLink').click();
     const privateLink=await page.evaluate(()=>navigator.clipboard.readText());
     const parsed=new URL(privateLink),token=parsed.hash.slice('#yilan-access='.length);
