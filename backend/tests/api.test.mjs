@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { createRequire } from 'node:module';
 import { prepareBaseline } from '../scripts/prepare-baseline.mjs';
@@ -9,15 +9,16 @@ import { payload } from './fixtures.mjs';
 
 const origin = 'https://bensonchen1204.github.io';
 // A synthetic test credential, never a household credential.
-const pin = 'synthetic-local-test-only';
+const token = Buffer.alloc(32,1).toString('base64url');
+const tokenHash = createHash('sha256').update(token).digest('hex');
 const schema = await readFile(new URL('../migrations/0001_state.sql',import.meta.url),'utf8');
-async function setup(t, { seed = true, configured = true } = {}) {
+async function setup(t, { seed = true, configured = true, hash = tokenHash } = {}) {
   const mf = new Miniflare(convertV4MiniflareOptions({
     modules: true, scriptPath: new URL('../dist/index.js',import.meta.url).pathname,
     compatibilityDate:'2026-10-01', compatibilityFlags:['nodejs_compat'],
     d1Databases:['DB'],
     ratelimits:{AUTH_LIMITER:{namespace_id:'1001001',simple:{limit:60,period:60}}},
-    bindings:{ALLOWED_ORIGIN:origin,YILAN_FAMILY_PIN:configured?pin:''},
+    bindings:{ALLOWED_ORIGIN:origin,YILAN_ACCESS_TOKEN_SHA256:configured?hash:''},
   }));
   t.after(()=>mf.dispose());
   const db = await mf.getD1Database('DB');
@@ -26,7 +27,7 @@ async function setup(t, { seed = true, configured = true } = {}) {
   await db.batch(statements.map(sql=>db.prepare(sql)));
   if (seed) await db.prepare(prepareBaseline(JSON.stringify(payload()),{source:'synthetic-test',sourceRevision:8}).sql).run();
   const request = (method='GET', body, extraHeaders={}, path='/v1/state')=>mf.dispatchFetch('https://worker.test'+path,{
-    method,headers:{origin,'x-family-pin':pin,'content-type':'application/json',...extraHeaders},
+    method,headers:{origin,authorization:'Bearer '+token,'content-type':'application/json',...extraHeaders},
     body:body===undefined?undefined:(typeof body==='string'?body:JSON.stringify(body)),
   });
   const write = (expected_revision, p=payload(), mutation_id=randomUUID())=>({payload:p,expected_revision,actor:'device-synthetic',mutation_id});
@@ -35,7 +36,7 @@ async function setup(t, { seed = true, configured = true } = {}) {
 
 test('auth, CORS, methods and no-store fail closed',async t=>{
   const {request}=await setup(t);
-  assert.equal((await request('GET',undefined,{'x-family-pin':'wrong'})).status,401);
+  assert.equal((await request('GET',undefined,{authorization:'Bearer '+Buffer.alloc(32,2).toString('base64url')})).status,401);
   assert.equal((await request('GET',undefined,{origin:'https://evil.example'})).status,403);
   const preflight=await request('OPTIONS'); assert.equal(preflight.status,204);
   assert.equal(preflight.headers.get('access-control-allow-origin'),origin);
@@ -99,25 +100,34 @@ test('duplicate seed fails without altering original or receipt',async t=>{
 test('unauthorized attempts are throttled',async t=>{
   const {request}=await setup(t);
   let final;
-  for(let i=0;i<65;i++) final=await request('GET',undefined,{'x-family-pin':'wrong'});
+  for(let i=0;i<65;i++) final=await request('GET',undefined,{authorization:'Bearer '+Buffer.alloc(32,2).toString('base64url')});
   assert.equal(final.status,429);assert.equal(final.headers.get('retry-after'),'60');
 });
-test('global failed-attempt budget bounds guesses across IPs and releases valid slots',async t=>{
+test('invalid callers cannot globally lock out other households devices',async t=>{
   const {request,db}=await setup(t);
-  for(let i=0;i<12;i++) assert.equal((await request()).status,200);
-  for(let i=0;i<10;i++) assert.equal((await request('GET',undefined,{'x-family-pin':'wrong','CF-Connecting-IP':'192.0.2.'+i})).status,401);
-  const blocked=await request('GET',undefined,{'CF-Connecting-IP':'192.0.2.99'});
-  assert.equal(blocked.status,429);assert.ok(Number(blocked.headers.get('retry-after'))>0);
-  await db.prepare('UPDATE auth_budget SET window_start=window_start-600').run();
-  assert.equal((await request()).status,200);
+  for(let i=0;i<12;i++) assert.equal((await request('GET',undefined,{authorization:'Bearer '+Buffer.alloc(32,2).toString('base64url'),'CF-Connecting-IP':'192.0.2.'+i})).status,401);
+  assert.equal((await request('GET',undefined,{'CF-Connecting-IP':'192.0.2.99'})).status,200);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM auth_budget').first()).n,0);
 });
-test('a stale auth window cannot roll the global budget backwards',async t=>{
-  const {request,db}=await setup(t);
-  await request();
-  await db.prepare('UPDATE auth_budget SET window_start=window_start+600,attempts=10').run();
-  const before=await db.prepare('SELECT * FROM auth_budget').first();
-  assert.equal((await request()).status,429);
-  assert.deepEqual(await db.prepare('SELECT * FROM auth_budget').first(),before);
+test('rotating the verifier rejects the old link and accepts only the replacement',async t=>{
+  const replacement=Buffer.alloc(32,3).toString('base64url');
+  const {request}=await setup(t,{hash:createHash('sha256').update(replacement).digest('hex')});
+  assert.equal((await request()).status,401);
+  assert.equal((await request('GET',undefined,{authorization:'Bearer '+replacement})).status,200);
+  assert.equal((await request('GET',undefined,{authorization:'','x-family-pin':'1234'})).status,401);
+  assert.equal((await request('GET',undefined,{authorization:'Bearer short'})).status,401);
+});
+test('public setup is isolated, no-store, nonce protected, and contains no household data',async t=>{
+  const {request}=await setup(t,{configured:false});
+  const response=await request('GET',undefined,{authorization:''},'/setup');
+  const html=await response.text();assert.equal(response.status,200);
+  assert.match(response.headers.get('content-security-policy'),/frame-ancestors 'none'/);
+  assert.equal(response.headers.get('referrer-policy'),'no-referrer');
+  assert.match(response.headers.get('cache-control'),/no-store/);
+  assert.ok(!html.includes(token));assert.ok(!html.includes(JSON.stringify(payload())));
+  assert.match(html,/crypto.getRandomValues/);assert.match(html,/YILAN_ACCESS_TOKEN_SHA256/);
+  assert.equal((await request('GET',undefined,{},'/setup?token=bad')).status,404);
+  assert.equal((await request('POST',undefined,{},'/setup')).status,404);
 });
 
 test('actual browser engine and D1 reconcile two offline phones without silent loss',async t=>{
@@ -126,7 +136,7 @@ test('actual browser engine and D1 reconcile two offline phones without silent l
   function phone(name) {
     const data=new Map([['yilanUtilityV2',JSON.stringify(payload())]]);
     const storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,String(v)),removeItem:k=>data.delete(k),key:i=>[...data.keys()][i]??null,get length(){return data.size;}};
-    const transport={endpoint:'worker-v1:https://worker.test/v1/state',enabled:()=>true,getPin:()=>pin,
+    const transport={endpoint:'worker-v1:https://worker.test/v1/state',enabled:()=>true,getCredential:()=>token,
       load:async()=>(await request()).json(),
       save:async(p,r,id)=>{
         const response=await request('POST',{payload:p,expected_revision:r,actor:name,mutation_id:id});

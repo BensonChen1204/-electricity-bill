@@ -56,6 +56,9 @@
     const draftKey = DRAFT_PREFIX + (options.tabId || uuid());
     let local = clone(options.initialState);
     let observedRaw = storage.getItem(STATE_KEY);
+    // Baked-in defaults are not user records. Only a genuinely pristine device
+    // may adopt its first authenticated cloud snapshot without a conflict choice.
+    let hasUserData = observedRaw !== null || storage.getItem(LEGACY_KEY) !== null;
     let generation = 0, conflict = null, blocked = null, currentStatus = { mode: 'local' };
     let ack = null, attempt = null, running = null, rerun = false, timer = null, session = 0;
     let knownMetaRaw = storage.getItem(metaKey);
@@ -129,6 +132,7 @@
       const recoverKey = options.recoveryDraftId ? DRAFT_PREFIX + options.recoveryDraftId : draftKey;
       const draft = JSON.parse(storage.getItem(recoverKey) || 'null');
       if (draft?.version === 1 && draft.endpoint === endpoint && draft.payload) {
+        hasUserData = true;
         // A newer global acknowledgment belongs to another tab, not this draft.
         ack = draft.base ? clone(draft.base) : null;
         if (!same(normalize(clone(draft.payload)), local)) {
@@ -141,6 +145,7 @@
     } catch (_) { blocked = 'backup_error'; }
     function saveLocal(value) {
       if (blocked) { emit(blocked); return false; }
+      hasUserData = true;
       local = clone(value);
       generation++;
       try { rememberDraft(); }
@@ -178,6 +183,7 @@
       } catch (error) { persistenceFailure(error); }
       observedRaw = raw;
       local = clone(remote.payload);
+      hasUserData = true;
       generation++;
       // V2 and the visible model must agree even if a later metadata write fails.
       // Any persistence failure is terminal until reload, including partial commits.
@@ -189,7 +195,8 @@
     }
     async function syncOnce(token, decision) {
       if (blocked) return emit(blocked);
-      if (!transport.enabled() || !transport.getPin()) return emit('local');
+      const credential = transport.getCredential ? transport.getCredential() : transport.getPin?.();
+      if (!transport.enabled() || !credential) return emit('local');
       if (localChangedElsewhere()) { flagLocalConflict(); return; }
       if (conflict?.kind === 'other-tab') return emit('conflict');
       emit('syncing');
@@ -212,7 +219,11 @@
       }
       if (ack && remote.revision < ack.revision) { setConflict(remote, 'revision-regressed'); return; }
       if (same(local, remote.payload)) { acknowledge(remote); return emit('synced'); }
-      if (!ack) { setConflict(remote, 'unknown-base'); return; }
+      if (!ack) {
+        if (!hasUserData) applyRemote(remote);
+        else setConflict(remote, 'unknown-base');
+        return;
+      }
       if (same(local, ack.payload)) { applyRemote(remote); return; }
       if (!same(remote.payload, ack.payload)) { setConflict(remote); return; }
       const outgoing = clone(local), outgoingGeneration = generation;

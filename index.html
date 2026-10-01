@@ -369,9 +369,10 @@
     </div>
     <p id="cloudProtocolNote" style="font-size:12px;color:#59677a"></p>
     <button id="exportSyncRecovery">下載同步復原備份</button>
-    <div class="settings-grid" style="margin-top:14px">
+    <p id="cloudPrivateLinkNote" class="cloud-summary" hidden></p>
+    <div id="legacyCloudAuth" class="settings-grid" style="margin-top:14px" hidden>
       <div class="setting">
-        <label>家庭密碼</label>
+        <label for="cloudPinInput">家庭密碼</label>
         <input id="cloudPinInput" type="password" inputmode="numeric" autocomplete="current-password" placeholder="請輸入家庭密碼" />
       </div>
     </div>
@@ -481,8 +482,23 @@ function freezeDataEdits(){
     : '無法安全保存資料，已停止後續修改。畫面可能包含尚未儲存的變更；請立即下載復原備份（含畫面中的資料），並保留瀏覽器原始資料。';
   if(initialBackupError)document.getElementById('appShell').hidden=true;
 }
+function usesPrivateLink(){return window.YilanCloud?.authMode==='capability-v1';}
+function cloudStatusText(){
+  if(usesPrivateLink()){
+    const auth=window.YilanCloud.credentialStatus();
+    if(!['backup_error','storage_error','conflict'].includes(syncStatus.mode)){
+      if(auth==='access_storage_error')return '私人連結無法保存在這台裝置 · 請確認瀏覽器允許儲存，再重新開啟連結';
+      if(auth==='access_link_scrub_failed')return '無法安全開啟私人連結 · 請使用一般瀏覽器重新開啟';
+      if(auth==='invalid_access_link')return '私人連結不完整 · 請重新開啟家人提供的完整連結';
+      if(auth==='access_link_required')return '資料保留在這台裝置 · 請開啟家人提供的私人連結';
+      if(auth==='unconfigured')return '雲端連線尚未設定完成 · 本機資料保留';
+      if(syncStatus.mode==='unauthorized')return '私人連結已失效 · 請向家人索取新連結，本機資料保留';
+    }
+  }
+  return CLOUD_STATUS_TEXT[syncStatus.mode]||CLOUD_STATUS_TEXT.local;
+}
 function updateDataStatus(){
-  const mode=syncStatus.mode, text=CLOUD_STATUS_TEXT[mode]||CLOUD_STATUS_TEXT.local;
+  const mode=syncStatus.mode, text=cloudStatusText();
   if(mode==='backup_error'||mode==='storage_error')dataEditsBlocked=true;
   freezeDataEdits();
   const el=document.getElementById('dataStatus'), wrap=document.getElementById('dataStatusWrap');
@@ -504,6 +520,18 @@ function updateDataStatus(){
       `這台正在編輯：${state.month}，${state.history?.length||0} 筆歷史；${label}：${remote?.month||'無法讀取'}，${remote?.history?.length||0} 筆歷史。兩份資料均已保留復原備份。選擇前可下載檢查；尚未選擇時不會覆蓋任何一方。`;
     document.getElementById('useRemoteCloud').textContent=otherTab?'改用另一分頁保存的資料':'改用雲端資料';
   }
+  const privateLink=usesPrivateLink(), hasCredential=privateLink && !!window.YilanCloud.getCredential();
+  document.getElementById('legacyCloudAuth').hidden=privateLink;
+  document.getElementById('cloudPinInput').disabled=privateLink || dataEditsBlocked;
+  if(privateLink)document.getElementById('cloudPinInput').value='';
+  const privateNote=document.getElementById('cloudPrivateLinkNote');
+  privateNote.hidden=!privateLink;
+  privateNote.textContent=hasCredential
+    ? '這台裝置已保存家庭私人連結，下次直接開啟即可自動同步。私人連結等同鑰匙，請只分享給家人；取消連線只會移除這台裝置保存的鑰匙。'
+    : '請開啟家人提供的完整私人連結，即可連接家庭資料。這台裝置會記住連結，之後可直接開啟；私人連結請只分享給家人。';
+  document.getElementById('connectCloud').hidden=privateLink && !hasCredential;
+  document.getElementById('connectCloud').textContent=privateLink?'重新同步':'連線並同步';
+  document.getElementById('disconnectCloud').hidden=privateLink && !hasCredential;
   document.getElementById('cloudProtocolNote').textContent=window.YilanCloud?.atomic
     ? '新版同步：每次寫入都會核對雲端版本；遇到衝突會保留兩份資料。'
     : '目前仍連接舊版服務；舊版不保證多裝置同時寫入的原子性。新服務尚未切換，請避免同時編輯。';
@@ -529,7 +557,7 @@ if(!initialBackupError){
 async function initCloudSync(force=false){
   if(!syncController)return;
   await syncController.sync();
-  if(force)toast(CLOUD_STATUS_TEXT[syncStatus.mode]||CLOUD_STATUS_TEXT.local);
+  if(force)toast(cloudStatusText());
 }
 function exportSyncRecovery(){
   try{
@@ -537,7 +565,7 @@ function exportSyncRecovery(){
     payload.currentInMemory=state?clone(state):null;
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
     downloadBlob(blob,`宜蘭同步復原備份_${new Date().toISOString().slice(0,10)}.json`);
-    toast('復原備份已匯出（不含家庭密碼）');
+    toast('復原備份已匯出（不含連線憑證）');
   }catch(_){toast('無法讀取瀏覽器儲存空間，請勿清除資料');}
 }
 function money(n){ return Math.round(Number(n)||0).toLocaleString('zh-TW'); }
@@ -560,7 +588,7 @@ function roomReady(r){ return r.rent!==null && r.water!==null && calc(r).ok; }
 function fixedLabel(v){ return v===null?'尚未設定':'$'+money(v); }
 function render(){
   document.getElementById('monthTitle').textContent=monthLabel(state.month);
-  document.getElementById('rateText').textContent=`${state.rate} 元 / 度`;
+  document.getElementById('rateText').textContent=`${escapeHtml(state.rate)} 元 / 度`;
   document.getElementById('billTitle').textContent=`宜蘭電費　${monthLabel(state.month)}`;
   document.getElementById('monthInput').value=state.month;
   document.getElementById('rateInput').value=state.rate;
@@ -572,12 +600,12 @@ function render(){
     div.className='room '+(c.error?'error':c.warn?'warn':c.ok?'valid':'');
     div.dataset.i=i;
     div.innerHTML=`
-      <div class="roomhead"><div class="roomno"><span class="dot"></span>${r.room}</div><div class="usage" id="usage-${i}">${c.ok?`本月 ${num(c.usage)} 度`:'待輸入'}</div></div>
+      <div class="roomhead"><div class="roomno"><span class="dot"></span>${escapeHtml(r.room)}</div><div class="usage" id="usage-${i}">${c.ok?`本月 ${num(c.usage)} 度`:'待輸入'}</div></div>
       <div class="metrics">
         <div><div class="label">上期度數</div><div class="prev">${num(r.prev)}</div></div>
-        <div><div class="label">本期度數</div><div class="reading-wrap"><input class="reading" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false" value="${r.curr}" placeholder="輸入本期度數" enterkeyhint="${i===state.rooms.length-1?'done':'next'}"><button class="clear-reading ${r.curr!==''?'show':''}" data-clear-i="${i}" type="button" aria-label="清除 ${r.room} 本期度數">×</button></div><div class="input-help">輸錯可按 × 清空重填</div></div>
+        <div><div class="label">本期度數</div><div class="reading-wrap"><input class="reading" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false" value="${escapeHtml(r.curr)}" placeholder="輸入本期度數" enterkeyhint="${i===state.rooms.length-1?'done':'next'}"><button class="clear-reading ${r.curr!==''?'show':''}" data-clear-i="${i}" type="button" aria-label="清除 ${escapeHtml(r.room)} 本期度數">×</button></div><div class="input-help">輸錯可按 × 清空重填</div></div>
       </div>
-      <div class="calcrow"><div class="calc" id="calc-${i}">${c.ok?`${num(c.usage)} 度 × ${state.rate} 元`:'輸入後自動計算'}</div><div class="amount" id="amount-${i}">${c.ok?'$'+money(c.amount):'—'}</div></div>
+      <div class="calcrow"><div class="calc" id="calc-${i}">${c.ok?`${num(c.usage)} 度 × ${escapeHtml(state.rate)} 元`:'輸入後自動計算'}</div><div class="amount" id="amount-${i}">${c.ok?'$'+money(c.amount):'—'}</div></div>
       <div class="hint" id="hint-${i}">${c.error?'本期度數不可低於上期度數。':c.warn?'本月用電明顯偏高，請再次確認數字。':''}</div>`;
     roomsEl.appendChild(div);
   });
@@ -614,7 +642,7 @@ function updateRoom(i){
   if(!card) return;
   card.className='room '+(c.error?'error':c.warn?'warn':c.ok?'valid':'');
   document.getElementById(`usage-${i}`).textContent=c.ok?`本月 ${num(c.usage)} 度`:'待輸入';
-  document.getElementById(`calc-${i}`).textContent=c.ok?`${num(c.usage)} 度 × ${state.rate} 元`:'輸入後自動計算';
+  document.getElementById(`calc-${i}`).textContent=c.ok?`${num(c.usage)} 度 × ${escapeHtml(state.rate)} 元`:'輸入後自動計算';
   document.getElementById(`amount-${i}`).textContent=c.ok?'$'+money(c.amount):'—';
   const hint=document.getElementById(`hint-${i}`);
   hint.textContent=c.error?'本期度數不可低於上期度數。':c.warn?'本月用電明顯偏高，請再次確認數字。':'';
@@ -666,7 +694,7 @@ function renderBill(){
   state.rooms.forEach(r=>{
     const c=calc(r); if(c.ok){total+=c.amount;readyCount++}
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${r.room}</td><td class="reading-cell">${num(r.prev)}</td><td class="reading-cell">${r.curr!==''?num(r.curr):'—'}</td><td class="amount-cell">${c.ok?money(c.amount):'—'}</td>`;
+    tr.innerHTML=`<td>${escapeHtml(r.room)}</td><td class="reading-cell">${num(r.prev)}</td><td class="reading-cell">${r.curr!==''?num(r.curr):'—'}</td><td class="amount-cell">${c.ok?money(c.amount):'—'}</td>`;
     body.appendChild(tr);
   });
   document.getElementById('totalAmount').textContent='$'+money(total);
@@ -688,7 +716,7 @@ function renderTenantCards(){
       </div>`).join('');
     card.innerHTML=`
       <div class="tenant-top">
-        <div><div class="tenant-room">${r.room}</div><div class="tenant-month">${shortMonth(state.month)}</div></div>
+        <div><div class="tenant-room">${escapeHtml(r.room)}</div><div class="tenant-month">${shortMonth(state.month)}</div></div>
         <button class="tiny-btn edit-fixed-one" data-room-i="${i}">固定費用</button>
       </div>
       <div class="charge-list">
@@ -725,9 +753,9 @@ function openFixed(){
   const grid=document.getElementById('fixedGrid'); grid.innerHTML='';
   state.rooms.forEach((r,i)=>{
     const row=document.createElement('div'); row.className='fixed-row';
-    row.innerHTML=`<div class="fixed-room">${r.room}</div>
-      <label>房租<input data-fixed-rent="${i}" type="number" inputmode="numeric" min="0" step="1" value="${r.rent===null?'':r.rent}" placeholder="未設定"></label>
-      <label>水費<input data-fixed-water="${i}" type="number" inputmode="numeric" min="0" step="1" value="${r.water===null?'':r.water}" placeholder="未設定"></label>`;
+    row.innerHTML=`<div class="fixed-room">${escapeHtml(r.room)}</div>
+      <label>房租<input data-fixed-rent="${i}" type="number" inputmode="numeric" min="0" step="1" value="${r.rent===null?'':escapeHtml(r.rent)}" placeholder="未設定"></label>
+      <label>水費<input data-fixed-water="${i}" type="number" inputmode="numeric" min="0" step="1" value="${r.water===null?'':escapeHtml(r.water)}" placeholder="未設定"></label>`;
     grid.appendChild(row);
   });
   document.getElementById('fixedFeesDialog').showModal();
@@ -844,7 +872,7 @@ function renderHistory(){
   list.innerHTML=rows.map(rec=>{
     const total=(rec.rooms||[]).reduce((a,r)=>a+(Number(r.total)||0),0);
     const when=rec.completedAt?new Date(rec.completedAt).toLocaleString('zh-TW',{dateStyle:'short',timeStyle:'short'}):'';
-    return `<div class="history-item"><div class="history-top"><div class="history-month">${monthLabel(rec.month)}</div><div class="history-total">$${money(total)}</div></div><div class="history-meta">${rec.rooms?.length||0} 間 · 電價 ${rec.rate} 元/度${when?' · '+when:''}</div></div>`;
+    return `<div class="history-item"><div class="history-top"><div class="history-month">${monthLabel(rec.month)}</div><div class="history-total">$${money(total)}</div></div><div class="history-meta">${rec.rooms?.length||0} 間 · 電價 ${escapeHtml(rec.rate)} 元/度${when?' · '+when:''}</div></div>`;
   }).join('');
   document.getElementById('undoLastComplete').disabled=false;
 }
@@ -893,21 +921,28 @@ document.getElementById('cancelSettings').onclick=()=>document.getElementById('s
 document.getElementById('saveSettings').onclick=()=>{state.month=document.getElementById('monthInput').value||state.month;state.rate=Number(document.getElementById('rateInput').value)||6;if(!saveState())return;document.getElementById('settingsDialog').close();render();toast('設定已更新')};
 document.getElementById('cloudBtn').onclick=()=>{
   document.getElementById('settingsDialog').close();
-  document.getElementById('cloudPinInput').value=window.YilanCloud?.getPin?.()||'';
+  document.getElementById('cloudPinInput').value=usesPrivateLink()?'':window.YilanCloud?.getPin?.()||'';
   updateDataStatus();
   document.getElementById('cloudDialog').showModal();
 };
 document.getElementById('closeCloud').onclick=()=>document.getElementById('cloudDialog').close();
 document.getElementById('connectCloud').onclick=async()=>{
-  const pin=document.getElementById('cloudPinInput').value.trim();
-  if(!pin){toast('請輸入家庭密碼');return;}
-  window.YilanCloud.setPin(pin);
+  if(usesPrivateLink()){
+    if(!window.YilanCloud.getCredential()){toast(cloudStatusText());return;}
+  }else{
+    const pin=document.getElementById('cloudPinInput').value.trim();
+    if(!pin){toast('請輸入家庭密碼');return;}
+    try{window.YilanCloud.setPin(pin);}catch(_){toast('無法保存家庭密碼，請確認瀏覽器允許儲存');return;}
+  }
   await initCloudSync(true);
   if(cloudReady) document.getElementById('cloudDialog').close();
 };
 document.getElementById('disconnectCloud').onclick=()=>{
   if(!confirm('只會取消這台裝置的雲端連線，本機資料不會刪除。確定？')) return;
-  window.YilanCloud.setPin('');
+  try{
+    if(window.YilanCloud.clearCredential)window.YilanCloud.clearCredential();
+    else window.YilanCloud.setPin('');
+  }catch(_){syncController?.disconnect();toast('無法移除這台裝置的連線憑證，請確認瀏覽器儲存設定');return;}
   syncController?.disconnect();
   cloudReady=false;
   document.getElementById('cloudPinInput').value='';
@@ -974,6 +1009,7 @@ updateDataStatus();
 if(window.YilanCloud?.enabled?.()) initCloudSync(false);
 window.addEventListener('focus',()=>initCloudSync(false));
 window.addEventListener('online',()=>initCloudSync(false));
+window.addEventListener('yilan-credential-change',()=>{updateDataStatus();initCloudSync(false);});
 document.querySelectorAll('dialog').forEach(dialog=>dialog.addEventListener('close',()=>initCloudSync(false)));
 window.addEventListener('storage',event=>syncController?.observeStorage(event));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')initCloudSync(false);});

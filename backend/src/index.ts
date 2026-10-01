@@ -1,4 +1,5 @@
 import { MAX_BODY_BYTES, validWrite } from './schema.ts';
+import { setupPage } from './setup-page.ts';
 
 type StateRow = { revision: number; payload: string; updated_at: string; actor: string; mutation_id: string; request_hash: string };
 class HttpError extends Error {
@@ -43,46 +44,40 @@ export default {
     });
     if (origin === env.ALLOWED_ORIGIN) {
       headers.set('Access-Control-Allow-Origin', origin);
-      headers.set('Access-Control-Allow-Headers', 'content-type,x-family-pin');
+      headers.set('Access-Control-Allow-Headers', 'content-type,authorization');
       headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
       headers.set('Access-Control-Max-Age', '600');
     }
     const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers });
     try {
-      if (origin && origin !== env.ALLOWED_ORIGIN) return reply({ error: 'origin_not_allowed' }, 403);
       const url = new URL(request.url);
+      if (url.pathname === '/setup' && !url.search && request.method === 'GET') {
+        const nonce = crypto.randomUUID();
+        return new Response(setupPage(nonce), { headers: {
+          'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+          'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
+          'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+        } });
+      }
+      if (origin && origin !== env.ALLOWED_ORIGIN) return reply({ error: 'origin_not_allowed' }, 403);
       if (url.pathname !== '/v1/state' || url.search) return reply({ error: 'not_found' }, 404);
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
       if (!['GET', 'POST'].includes(request.method)) return reply({ error: 'method_not_allowed' }, 405);
-      const configuredPin = env.YILAN_FAMILY_PIN;
-      if (!configuredPin || configuredPin.length > 256 || !env.AUTH_LIMITER) return reply({ error: 'auth_not_configured' }, 503);
-      // Edge IP throttling plus an atomic global failed-attempt budget below.
-      // Neither replaces a strong approved household passphrase. Never log it.
+      const configuredHash = env.YILAN_ACCESS_TOKEN_SHA256?.trim();
+      if (!configuredHash || !/^[a-f0-9]{64}$/i.test(configuredHash) || !env.AUTH_LIMITER) return reply({ error: 'auth_not_configured' }, 503);
+      // A user-generated 256-bit capability replaces the guessable family PIN.
+      // Per-IP throttling avoids a global lockout an outsider could exhaust.
       const limit = await env.AUTH_LIMITER.limit({ key: 'auth:' + (request.headers.get('CF-Connecting-IP') || 'unknown') });
       if (!limit.success) { headers.set('Retry-After', '60'); return reply({ error: 'rate_limited' }, 429); }
-      const pin = request.headers.get('x-family-pin') || '';
-      if (!pin || pin.length > 256) return reply({ error: 'unauthorized' }, 401);
-      // Start at the primary even if read replication is enabled later.
-      const db = env.DB.withSession('first-primary');
-      // Reserve one slot BEFORE testing the PIN, so parallel guesses or many IPs
-      // cannot bypass the limit. Valid logins release their slot; failures keep
-      // it for this ten-minute window. At most ten unverified attempts can be in
-      // flight globally. A crashed request may consume a slot until expiry.
-      const windowStart = Math.floor(Date.now() / 600000) * 600;
-      const reserved = await db.prepare(`INSERT INTO auth_budget (id,window_start,attempts)
-        VALUES ('family',(CAST(strftime('%s','now') AS INTEGER)/600)*600,1)
-        ON CONFLICT(id) DO UPDATE SET
-        attempts = CASE WHEN window_start < excluded.window_start THEN 1 ELSE attempts + 1 END,
-        window_start = excluded.window_start
-        WHERE window_start < excluded.window_start OR (window_start = excluded.window_start AND attempts < 10)
-        RETURNING attempts,window_start`).first<{ attempts: number; window_start: number }>();
-      if (!reserved) {
-        headers.set('Retry-After', String(Math.max(1,windowStart + 600 - Math.floor(Date.now()/1000))));
-        return reply({ error: 'rate_limited' }, 429);
-      }
-      const [supplied,expected] = await Promise.all([digest(pin),digest(configuredPin)]);
+      const match = /^Bearer ([A-Za-z0-9_-]{43})$/i.exec(request.headers.get('authorization') || '');
+      if (!match) return reply({ error: 'unauthorized' }, 401);
+      const expected = Uint8Array.from(configuredHash.match(/../g)!, byte => parseInt(byte,16));
+      const supplied = await digest(match[1]);
       if (!crypto.subtle.timingSafeEqual(supplied,expected)) return reply({ error: 'unauthorized' }, 401);
-      await db.prepare("UPDATE auth_budget SET attempts = MAX(0,attempts-1) WHERE id='family' AND window_start=?").bind(reserved.window_start).run();
+      // Read from the primary even if replication is enabled later. Rotating the
+      // configured hash revokes old links immediately: no sessions bypass it.
+      const db = env.DB.withSession('first-primary');
       if (request.method === 'GET') {
         const row = await db.prepare("SELECT * FROM app_state WHERE id = 'main'").first<StateRow>();
         return reply(row ? { ok: true, exists: true, revision: row.revision, payload: JSON.parse(row.payload), updated_at: row.updated_at }

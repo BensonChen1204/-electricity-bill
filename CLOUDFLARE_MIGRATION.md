@@ -43,7 +43,7 @@ node --test tests/*.test.cjs
 All automated fixtures are synthetic. Workerd/Miniflare tests use only local D1.
 `npm run build` is `wrangler deploy --dry-run`; it does not deploy. Types are
 generated from the actual Wrangler config before checking, and are not checked
-in. No login, API token, production PIN, or remote database is needed for tests.
+in. No login, real capability, production secret, or remote database is needed for tests.
 
 ## Required cutover gates
 
@@ -55,19 +55,33 @@ in. No login, API token, production PIN, or remote database is needed for tests.
    Each phone needs to open the updated app at least once for its automatic local
    backup to exist. Until then, do not claim that phone has been backed up. If a
    phone differs, preserve both versions and review the conflict before choosing.
-3. Obtain approval for the auth setup. This candidate keeps the existing shared
-   household password model, but does not retrieve, copy or create credentials.
-   The user enters the existing family password directly into the new Worker's
-   encrypted `YILAN_FAMILY_PIN` secret in the Cloudflare dashboard, through the
-   approved secure user handoff. The assistant does not handle this entry. The
-   Worker hashes both supplied and configured values in memory and compares them
-   with the platform's timing-safe primitive.
-   Never place the plaintext password or hash in Git, config, logs or chat.
-   A strong household passphrase is recommended. In addition to a per-IP edge
-   limiter, D1 atomically bounds failed/unverified attempts to ten per ten-minute
-   window globally; valid requests release their reserved slot. After ten wrong
-   guesses all devices must wait for the window to expire. A malicious party can
-   cause this temporary lockout, so a short PIN still has security/usability limits.
+3. Household access uses a high-entropy private link, not a password or account.
+   The owner opens `https://yilan-sync-v3.neihu0122.workers.dev/setup` in their own
+   browser and personally clicks the generation button. Web Crypto generates
+   32 random bytes locally. The owner copies the computed SHA256 verifier into
+   the encrypted Cloudflare Secret `YILAN_ACCESS_TOKEN_SHA256`, saves/deploys it,
+   and returns to click the connection check. The assistant must not generate,
+   inspect, copy, enter, or share the actual token, verifier, or private link.
+   Only the owner shares the resulting app link with authorized family members.
+   A synthetic test capability must never be configured in production.
+
+   The link contains `#yilan-access=...`, not a query parameter. Fragments are
+   consumed and scrubbed by the client; the token is stored per API endpoint and
+   sent only in the Authorization header to the configured HTTPS API. Browser
+   backups do not contain it. The setup page has no third-party scripts or
+   analytics, a restrictive CSP, no-referrer policy, and no household data in its
+   HTML. Its connection check performs an authenticated read with the user-owned
+   capability, without the assistant knowing the credential.
+
+   Anyone holding the link has read/write access to this household. Keep it out
+   of public messages, screenshots, Git, logs, and assistant chat. The owner must
+   preserve it before closing the setup tab; it cannot be recovered from the
+   server. Rotating the configured hash revokes every old link immediately;
+   family devices need the new link. Disconnecting one browser only removes
+   its local copy and does not revoke copies elsewhere. The 60/minute per-IP
+   limiter is supplemental protection, not a substitute for token entropy.
+   The former PIN budget table is retained unused, avoiding anonymous guesses
+   globally locking out authorized family members.
 4. Create a **new** D1 database and put its confirmed ID in `backend/wrangler.jsonc`.
    Confirm its name is `yilan-sync-v3`. Apply only `backend/migrations/0001_state.sql`.
    Leave `electricity-bill-api`, its configuration, and Supabase untouched.
@@ -90,11 +104,11 @@ in. No login, API token, production PIN, or remote database is needed for tests.
    Keep the full old state-history export as a separate private archive. The
    seed carries the current JSON's completed-month history, not old sync versions.
 7. Configure a dedicated approved public Worker endpoint and matching exact
-   `ALLOWED_ORIGIN`, then test authenticated reads, invalid PIN, preflight,
+   `ALLOWED_ORIGIN`, then test authenticated reads, invalid capabilities, preflight,
    two-device CAS, retries, conflict resolution, offline edit/reload/reconnect,
    reload of the PWA, and backup export. Do not put authentication in URLs.
 8. Only after approval switch the public frontend config to
-   `{ protocol: 'worker-v1', functionUrl: 'https://CONFIRMED_HOST/v1/state' }`.
+   `{ protocol: 'worker-v1', authMode: 'capability-v1', functionUrl: 'https://CONFIRMED_HOST/v1/state' }`.
    No anon key is needed. Publish the reviewed UI with the new service-worker
    version. Verify both phones, not only a desktop simulation.
 9. During the migration window, avoid edits on an old cached client. An old
@@ -113,9 +127,12 @@ in. No login, API token, production PIN, or remote database is needed for tests.
   for independent backup. Cloudflare D1 Time Travel has plan-dependent retention.
 - Requests are capped at 512 KiB including the write envelope; backups approaching
   that size require a reviewed limit/schema change before cutover.
-- Authentication is a shared secret, not per-person accounts or revocable device
-  sessions. Local storage retains the current app's credential behavior. Changing
-  that model requires separate approval and a phone migration plan.
+- Authentication is a shared capability, not per-person accounts or revocable
+  device sessions. Someone with access to an authorized browser's storage can
+  retrieve the token. Use normal device locks and share only with trusted family.
+- The owner must finish the setup page's authenticated check before frontend
+  cutover. Automated local/CI checks use synthetic capabilities only. After
+  publication, verify both phones and their local backup/conflict behavior.
 
 References: [D1 transactions and sessions](https://developers.cloudflare.com/d1/worker-api/d1-database/),
 [rate-limit semantics](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/),

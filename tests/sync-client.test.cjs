@@ -7,6 +7,13 @@ const createTransport = require('../cloud-sync.js');
 // Deliberately synthetic fixtures, unrelated to any household's real records.
 const state = (reading = '12') => ({ schemaVersion: 2, month: '2040-01', rate: 3, rooms: [{room: 'TEST', prev: 10, curr: reading, rent: 20, water: 2, others: []}], history: [] });
 const copy = value => JSON.parse(JSON.stringify(value));
+const SYNTHETIC_TOKEN = 'A'.repeat(43);
+const workerConfig = (url = 'https://sync.example.test/v1/state') => ({protocol:'worker-v1',authMode:'capability-v1',functionUrl:url});
+function privateLink(hash = '#yilan-access=' + SYNTHETIC_TOKEN) {
+  const location = {hash,pathname:'/rental/',search:'?view=month'};
+  const calls = [];
+  return {location,calls,history:{state:{view:'month'},replaceState(state,title,url){calls.push({state,title,url});location.hash='';}}};
+}
 class Storage {
   data = new Map(); fail = false;
   get length() { return this.data.size; }
@@ -118,10 +125,11 @@ test('a stale-tab durable draft is recovered after reload', async () => {
 });
 test('transport load never writes revision; Worker POST carries explicit CAS and mutation id', async () => {
   const storage=new Storage();storage.setItem('yilanFamilyPin','synthetic-pin');storage.setItem('yilanCloudRevision','99');const requests=[];
-  const transport=createTransport({protocol:'worker-v1',functionUrl:'https://sync.example.test/v1/state'},storage,async(url,req)=>{requests.push(req);return {ok:true,json:async()=>({exists:true,payload:state(),revision:5})};},{randomUUID:()=> 'actor'});
-  await transport.load();assert.equal(storage.getItem('yilanCloudRevision'),'99');assert.equal(storage.length,2);
+  const transport=createTransport(workerConfig(),storage,async(url,req)=>{assert.equal(url,'https://sync.example.test/v1/state');requests.push(req);return {ok:true,json:async()=>({exists:true,payload:state(),revision:5})};},{randomUUID:()=> 'actor'},privateLink());
+  await transport.load();assert.equal(storage.getItem('yilanCloudRevision'),'99');assert.equal(storage.length,3);
+  assert.equal(requests[0].headers.Authorization,'Bearer '+SYNTHETIC_TOKEN);assert.equal(requests[0].headers['x-family-pin'],undefined);
   await transport.save(state(),5,'mutation-test');const body=JSON.parse(requests[1].body);
-  assert.equal(body.expected_revision,5);assert.equal(body.mutation_id,'mutation-test');assert.equal(requests[1].headers.apikey,undefined);assert.equal(requests[1].redirect,'error');assert.equal(requests[1].credentials,'omit');
+  assert.equal(body.expected_revision,5);assert.equal(body.mutation_id,'mutation-test');assert.equal(requests[1].headers.apikey,undefined);assert.equal(requests[1].headers['x-family-pin'],undefined);assert.equal(requests[1].headers.Authorization,'Bearer '+SYNTHETIC_TOKEN);assert.equal(requests[1].redirect,'error');assert.equal(requests[1].credentials,'omit');
   await assert.rejects(()=>transport.save(state(),0,'mutation-test'),/verified_baseline_required/);
 });
 test('legacy config remains legacy and requires its anon key', () => {
@@ -136,7 +144,7 @@ test('credential-bearing or unknown endpoint configuration is rejected',()=>{
 test('service worker never intercepts cross-origin/API/auth/unknown assets', () => {
   const handlers={};vm.runInNewContext(fs.readFileSync(require.resolve('../sw.js'),'utf8'),{URL,Set,self:{registration:{scope:'https://app.example.test/rental/'},location:{origin:'https://app.example.test'},addEventListener:(name,handler)=>handlers[name]=handler}});
   for(const [url,method,headers] of [
-    ['https://api.example.test/v1/state','GET',{}],['https://app.example.test/api/state','GET',{}],['https://app.example.test/rental/api','GET',{}],['https://app.example.test/rental/index.html?token=a','GET',{}],['https://app.example.test/rental/index.html','POST',{}],['https://app.example.test/rental/index.html','GET',{'x-family-pin':'test'}],['https://app.example.test/rental/unknown.js','GET',{}]
+    ['https://api.example.test/v1/state','GET',{}],['https://app.example.test/api/state','GET',{}],['https://app.example.test/rental/api','GET',{}],['https://app.example.test/rental/index.html?token=a','GET',{}],['https://app.example.test/rental/index.html','POST',{}],['https://app.example.test/rental/index.html','GET',{'x-family-pin':'test'}],['https://app.example.test/rental/unknown.js','GET',{}],['https://app.example.test/rental/index.html','GET',{'Authorization':'Bearer '+SYNTHETIC_TOKEN}]
   ]){
     let intercepted=false;handlers.fetch({request:{url,method,headers:new Headers(headers)},respondWith:()=>{intercepted=true;}});assert.equal(intercepted,false,url);
   }
@@ -180,4 +188,117 @@ test('unsaved modal edits defer remote replacement until editing ends', async ()
   f.server.payload=state('25');f.server.revision=2;editing=true;await f.engine.sync();
   assert.equal(f.engine.status().mode,'editing');assert.equal(f.applied(),null);assert.equal(f.engine.metadata().ack.revision,1);
   editing=false;await f.engine.sync();assert.equal(f.applied().rooms[0].curr,'25');f.engine.dispose();
+});
+
+test('capability link is scrubbed before storage and resumes only at the same endpoint', () => {
+  const storage=new Storage(),browser=privateLink(),events=[];
+  const replace=browser.history.replaceState;browser.history.replaceState=(...args)=>{events.push('scrub');replace(...args);};
+  const set=storage.setItem.bind(storage);storage.setItem=(...args)=>{events.push('store');set(...args);};
+  const first=createTransport(workerConfig(),storage,()=>{}, {},browser);
+  assert.deepEqual(events,['scrub','store']);assert.equal(browser.location.hash,'');
+  assert.equal(browser.calls[0].url,'/rental/?view=month');assert.deepEqual(browser.calls[0].state,{view:'month'});
+  assert.equal(first.credentialStatus(),'ready');assert.equal(first.getPin(),'');assert.equal(first.getCredential(),SYNTHETIC_TOKEN);
+  const second=createTransport(workerConfig(),storage,()=>{},{});
+  assert.equal(second.getCredential(),SYNTHETIC_TOKEN);
+  const other=createTransport(workerConfig('https://other.example.test/v1/state'),storage,()=>{},{});
+  assert.equal(other.getCredential(),'');assert.equal(other.credentialStatus(),'access_link_required');
+  assert.ok(!first.endpoint.includes(SYNTHETIC_TOKEN));
+});
+test('capability credentials stay out of recovery, drafts, metadata, and request bodies', async () => {
+  const storage=new Storage();storage.setItem(Sync.STATE_KEY,JSON.stringify(state()));let remote=state(),revision=1;const bodies=[];
+  const transport=createTransport(workerConfig(),storage,async(url,request)=>{
+    if(request.method==='POST'){bodies.push(request.body);remote=JSON.parse(request.body).payload;revision++;}
+    return {ok:true,json:async()=>({exists:true,payload:remote,revision})};
+  },{randomUUID:()=> 'actor'},privateLink());
+  const engine=Sync.create({storage,transport,initialState:state(),tabId:'synthetic',uuid:()=> 'test-id',debounceMs:100000});
+  await engine.sync();assert.equal(engine.status().mode,'synced');engine.saveLocal(state('18'));await engine.sync();
+  const exported=JSON.stringify(engine.exportRecovery());assert.ok(!exported.includes(SYNTHETIC_TOKEN));assert.ok(!exported.includes('yilanAccessToken'));
+  assert.ok(!JSON.stringify(engine.metadata()).includes(SYNTHETIC_TOKEN));assert.ok(!bodies.join('').includes(SYNTHETIC_TOKEN));
+  for(const [key,value] of storage.data)if(!key.startsWith('yilanAccessToken:'))assert.ok(!value.includes(SYNTHETIC_TOKEN),key);
+  engine.dispose();
+});
+test('legacy transport never consumes or sends a capability token', async () => {
+  const storage=new Storage();storage.setItem('yilanFamilyPin','synthetic-pin');const browser=privateLink(),requests=[];
+  const t=createTransport({functionUrl:'https://legacy.example.test/function',anonKey:'synthetic-public-key'},storage,async(url,request)=>{requests.push(request);return {ok:true,json:async()=>({})};},{},browser);
+  assert.equal(browser.location.hash,'');assert.equal(storage.length,1);assert.equal(t.getCredential(),'synthetic-pin');
+  await t.load();assert.equal(requests[0].headers['x-family-pin'],'synthetic-pin');assert.equal(requests[0].headers.apikey,'synthetic-public-key');assert.equal(requests[0].headers.Authorization,undefined);
+  t.setPin('synthetic-new-pin');assert.equal(t.getPin(),'synthetic-new-pin');t.clearCredential();assert.equal(t.getPin(),'');
+});
+test('only capability-v1 on a trusted configured HTTPS Worker can consume links', async () => {
+  const configs=[
+    {protocol:'worker-v1',functionUrl:'https://sync.example.test/v1/state'},
+    {...workerConfig(),authMode:'unknown'},
+    {...workerConfig(),protocol:'supabase-legacy',anonKey:'synthetic-public-key'},
+    workerConfig('http://127.0.0.1/v1/state'),workerConfig('http://sync.example.test/v1/state'),
+    workerConfig('https://user:pass@sync.example.test/v1/state'),workerConfig('https://sync.example.test/v1/state?token=synthetic'),
+    workerConfig('https://sync.example.test/v1/state#synthetic'),workerConfig('not-a-url')
+  ];
+  for(const config of configs){
+    const storage=new Storage(),browser=privateLink();let fetched=false;
+    const t=createTransport(config,storage,async()=>{fetched=true;},{},browser);
+    assert.equal(browser.location.hash,'');assert.equal(storage.length,0);assert.equal(t.enabled(),false);assert.equal(t.getCredential(),'');
+    await assert.rejects(()=>t.load(),/cloud_not_configured/);assert.equal(fetched,false);
+  }
+});
+test('malformed capability links are scrubbed and fail closed without storage or requests', async () => {
+  for(const token of ['', 'A'.repeat(42),'A'.repeat(44),'A'.repeat(42)+'=','A'.repeat(42)+'/',SYNTHETIC_TOKEN+'\n',SYNTHETIC_TOKEN+'&other=1','%41'.repeat(43)]){
+    const storage=new Storage(),browser=privateLink('#yilan-access='+token);let fetched=false;
+    const t=createTransport(workerConfig(),storage,async()=>{fetched=true;},{},browser);
+    assert.equal(browser.location.hash,'');assert.equal(storage.length,0);assert.equal(t.getCredential(),'');assert.equal(t.credentialStatus(),'invalid_access_link');
+    await assert.rejects(()=>t.load(),/invalid_access_link/);assert.equal(fetched,false);
+  }
+});
+test('missing links never generate credentials or reuse the legacy PIN', async () => {
+  const storage=new Storage();storage.setItem('yilanFamilyPin','synthetic-pin');
+  const t=createTransport(workerConfig(),storage,()=>{throw new Error('must not fetch');},{randomUUID:()=>{throw new Error('must not generate');}});
+  assert.equal(t.getCredential(),'');assert.equal(t.getPin(),'');assert.equal(t.credentialStatus(),'access_link_required');
+  t.setPin('B'.repeat(43));assert.equal(t.getCredential(),'');assert.equal(storage.getItem('yilanFamilyPin'),'synthetic-pin');
+  await assert.rejects(()=>t.load(),/access_link_required/);
+});
+test('disconnect removes only the current endpoint credential on this device', () => {
+  const storage=new Storage();storage.setItem(Sync.STATE_KEY,JSON.stringify(state()));storage.setItem('yilanFamilyPin','synthetic-pin');
+  const t=createTransport(workerConfig(),storage,()=>{},{},privateLink());
+  const other=createTransport(workerConfig('https://other.example.test/v1/state'),storage,()=>{},{},privateLink('#yilan-access='+'B'.repeat(43)));
+  const otherDevice=new Storage(),remoteDevice=createTransport(workerConfig(),otherDevice,()=>{},{},privateLink());
+  t.clearCredential();assert.equal(t.getCredential(),'');assert.equal(t.credentialStatus(),'access_link_required');
+  assert.equal(other.getCredential(),'B'.repeat(43));assert.equal(remoteDevice.getCredential(),SYNTHETIC_TOKEN);
+  assert.equal(storage.getItem('yilanFamilyPin'),'synthetic-pin');assert.deepEqual(JSON.parse(storage.getItem(Sync.STATE_KEY)),state());
+});
+test('fragment scrub and credential persistence failures never send the token', async () => {
+  const storage=new Storage(),browser=privateLink();browser.history.replaceState=()=>{throw new Error('history unavailable');};
+  const t=createTransport(workerConfig(),storage,()=>{throw new Error('must not fetch');},{},browser);
+  assert.equal(storage.length,0);assert.equal(t.credentialStatus(),'access_link_scrub_failed');await assert.rejects(()=>t.load(),/access_link_scrub_failed/);
+  for(const silentFailure of [false,true]){
+    const failed=new Storage(),link=privateLink();if(silentFailure)failed.setItem=()=>{};else failed.fail=true;
+    const blocked=createTransport(workerConfig(),failed,()=>{throw new Error('must not fetch');},{},link);
+    assert.equal(link.location.hash,'');assert.equal(blocked.credentialStatus(),'access_storage_error');assert.equal(blocked.getCredential(),'');
+    await assert.rejects(()=>blocked.load(),/access_storage_error/);
+  }
+});
+test('failed credential removal cannot silently continue authenticated requests', async () => {
+  const storage=new Storage(),t=createTransport(workerConfig(),storage,()=>{throw new Error('must not fetch');},{},privateLink());
+  storage.removeItem=()=>{};assert.throws(()=>t.clearCredential(),/credential_removal_failed/);assert.equal(t.getCredential(),'');
+  await assert.rejects(()=>t.load(),/access_storage_error/);
+});
+
+test('a truly new device automatically adopts authenticated cloud after a durable backup', async () => {
+  const storage=new Storage(),f=fixture(state('15'),{storage});await f.engine.sync();
+  assert.equal(f.engine.status().mode,'synced');assert.equal(f.applied().rooms[0].curr,'12');assert.equal(f.calls.length,0);
+  assert.equal(JSON.parse(storage.getItem(Sync.STATE_KEY)).rooms[0].curr,'12');
+  const backup=Sync.exportRecovery(storage).records.find(r=>r.raw.includes('before-cloud-apply'));
+  assert.ok(backup);assert.equal(JSON.parse(backup.raw).raw[Sync.STATE_KEY],null);assert.equal(JSON.parse(backup.raw).raw[Sync.LEGACY_KEY],null);
+  f.engine.dispose();
+});
+test('a first user edit during the pristine-device cloud read is preserved as a conflict', async () => {
+  const f=fixture(state('15'),{storage:new Storage()});let release;
+  f.transport.load=()=>new Promise(resolve=>{release=resolve;});const pending=f.engine.sync();
+  f.engine.saveLocal(state('17'));release({exists:true,payload:state('12'),revision:1});await pending;
+  assert.equal(f.engine.status().mode,'conflict');assert.equal(f.engine.snapshot().rooms[0].curr,'17');assert.equal(f.applied(),null);assert.equal(f.calls.length,0);
+  assert.equal(JSON.parse(f.storage.getItem(Sync.STATE_KEY)).rooms[0].curr,'17');f.engine.dispose();
+});
+test('legacy records or a recovered draft prevent pristine-device automatic replacement', async () => {
+  const legacy=new Storage();legacy.setItem(Sync.LEGACY_KEY,'existing-legacy-records');
+  const f=fixture(state('15'),{storage:legacy});await f.engine.sync();assert.equal(f.engine.status().mode,'conflict');assert.equal(f.applied(),null);f.engine.dispose();
+  const storage=new Storage();storage.setItem('yilanSyncDraft:old-tab',JSON.stringify({version:1,endpoint:'worker-v1:https://sync.example.test/v1/state',payload:state('15'),base:null}));
+  const draft=fixture(state('15'),{storage,engine:{recoveryDraftId:'old-tab'}});await draft.engine.sync();assert.equal(draft.engine.status().mode,'conflict');assert.equal(draft.applied(),null);draft.engine.dispose();
 });

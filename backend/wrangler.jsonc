@@ -9,7 +9,7 @@
   "vars": {
     "ALLOWED_ORIGIN": "https://bensonchen1204.github.io"
   },
-  "secrets": { "required": ["YILAN_FAMILY_PIN"] },
+  "secrets": { "required": ["YILAN_ACCESS_TOKEN_SHA256"] },
   "d1_databases": [{
     "binding": "DB",
     "database_name": "yilan-sync-v3",
