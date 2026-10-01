@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars*
+.env*
+backups/
+*.backup.json
+*.seed.sql
+playwright-report/
+test-results/
+
+backend/worker-configuration.d.ts

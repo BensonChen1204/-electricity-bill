@@ -1,5 +1,10 @@
 # v2.2 Cloud Sync
 
+Historical Supabase architecture. The new Worker/D1 candidate and current safety
+gates are documented in [CLOUDFLARE_MIGRATION.md](CLOUDFLARE_MIGRATION.md).
+The old Edge Function's separate read/upsert does not guarantee atomic multi-device
+writes; do not treat its revision check as equivalent to the new D1 CAS.
+
 Goal: make the same rental-account state available from Benson's phone, his mother's phone, and ChatGPT-assisted administration.
 
 ## Architecture

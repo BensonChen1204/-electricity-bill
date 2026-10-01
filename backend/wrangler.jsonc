@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "yilan-sync-v3",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "ALLOWED_ORIGIN": "https://bensonchen1204.github.io"
+  },
+  "secrets": { "required": ["YILAN_FAMILY_PIN"] },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "yilan-sync-v3",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }],
+  "ratelimits": [{
+    "name": "AUTH_LIMITER",
+    "namespace_id": "1001001",
+    "simple": { "limit": 60, "period": 60 }
+  }],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": false }
+  }
+}

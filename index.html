@@ -13,7 +13,9 @@
 <title>宜蘭租屋小幫手</title>
 <script src="./cloud-config.js"></script>
 <script src="./cloud-sync.js"></script>
+<script src="./sync-engine.js"></script>
 <style>
+  [hidden]{display:none!important}
   :root{
     --bg:#f5f7fb;
     --card:#ffffff;
@@ -203,7 +205,12 @@
 </style>
 </head>
 <body>
-<div class="shell">
+<section id="recoveryBlockedPanel" class="cloud-summary" style="margin:24px" hidden role="alert">
+  <h2>資料保護已暫停操作</h2>
+  <p id="recoveryBlockedMessage"></p>
+  <button id="exportBlockedRecovery">下載原始資料與復原備份</button>
+</section>
+<div class="shell" id="appShell">
   <div class="topbar">
     <div>
       <div class="eyebrow">YILAN RENTAL</div>
@@ -272,7 +279,7 @@
   </section>
 
   <div class="footnote">完成本月後，本月電表會自動成為下個月的上期度數；歷史資料保留當時的房租、水費與其他費用。</div>
-  <div class="data-status" id="dataStatusWrap"><span class="status-dot"></span><span id="dataStatus">資料已儲存在此裝置</span><span>·</span><span>v2.2</span></div>
+  <div class="data-status" id="dataStatusWrap"><span class="status-dot"></span><span id="dataStatus">資料已儲存在此裝置</span><span>·</span><span>v2.3</span></div>
 </div>
 
 <dialog id="settingsDialog">
@@ -350,8 +357,18 @@
 <dialog id="cloudDialog">
   <div class="modal">
     <h3>雲端同步</h3>
-    <p>同一組家庭密碼可讓你、媽媽與其他授權裝置共用同一份資料。每次修改都會先存本機，再自動同步到雲端。</p>
+    <p>每次修改會先存本機。離線修改會保留；本機與雲端不同且無法安全合併時，請先下載復原備份，再選擇保留哪一份。空白雲端須由管理者核對備份後建立基準，不會自動上傳預設資料。</p>
     <div class="cloud-summary" id="cloudSummary"><strong>狀態：</strong>尚未連線</div>
+    <div id="cloudConflict" class="cloud-summary" hidden>
+      <strong>兩份資料已暫停自動合併</strong>
+      <p id="cloudConflictDetail"></p>
+      <div class="modal-actions">
+        <button id="keepLocalCloud">保留這台正在編輯的資料</button>
+        <button id="useRemoteCloud">改用雲端資料</button>
+      </div>
+    </div>
+    <p id="cloudProtocolNote" style="font-size:12px;color:#59677a"></p>
+    <button id="exportSyncRecovery">下載同步復原備份</button>
     <div class="settings-grid" style="margin-top:14px">
       <div class="setting">
         <label>家庭密碼</label>
@@ -382,7 +399,7 @@
 <canvas id="exportCanvas" style="display:none"></canvas>
 
 <script>
-const APP_VERSION='2.2.0';
+const APP_VERSION='2.3.0';
 const STORAGE_KEY='yilanUtilityV2';
 const LEGACY_STORAGE_KEY='yilanUtilityV1';
 const defaultState = {
@@ -397,13 +414,16 @@ const defaultState = {
   ],
   history:[]
 };
-let state = normalizeState(loadState());
+// Preserve the exact original strings before parsing or normalizing either schema.
+let initialBackupError = null;
+try { window.YilanSync.captureInitialBackup(localStorage); }
+catch(error) { initialBackupError = error; }
+let state = initialBackupError ? null : normalizeState(loadState());
+let dataEditsBlocked = !!initialBackupError;
 let currentOtherRoom = null;
 let cloudReady = false;
-let cloudApplying = false;
-let cloudSaveTimer = null;
-let cloudLastError = '';
-
+let syncController = null;
+let syncStatus = {mode: initialBackupError ? 'backup_error' : 'local'};
 
 function clone(v){ return JSON.parse(JSON.stringify(v)); }
 function loadState(){
@@ -432,96 +452,93 @@ function normalizeState(s){
   return s;
 }
 function saveState(){
+  if(dataEditsBlocked){toast('資料保護已暫停操作，請先下載復原備份');return false;}
   state.schemaVersion=2;
   state.lastSavedAt=new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  updateDataStatus();
-  if(!cloudApplying) scheduleCloudSave();
+  const saved=syncController.saveLocal(state);
+  if(!saved)toast(CLOUD_STATUS_TEXT[syncStatus.mode]||'尚未儲存成功，請下載復原備份');
+  return saved;
 }
-function setCloudStatus(mode,text){
+const CLOUD_STATUS_TEXT = {
+  editing:'正在編輯 · 關閉視窗後再核對雲端更新',
+  local:'資料保留在這台裝置', pending:'已存本機 · 等待同步', syncing:'正在核對雲端資料',
+  synced:'雲端已同步', conflict:'資料版本不同 · 請選擇保留版本',
+  'needs-baseline':'雲端尚未建立核對過的基準 · 本機資料保留',
+  'invalid-data':'資料格式未通過雲端檢查 · 請匯出備份並請管理者協助修正',
+  'payload-too-large':'備份資料超過雲端大小限制 · 請匯出備份並請管理者協助',
+  'rate-limited':'同步請求過於頻繁 · 資料保留在本機，稍後重新連線',
+  offline:'同步暫停 · 修改保留在本機，連線後重試', unauthorized:'家庭密碼不正確 · 本機資料保留',
+  backup_error:'復原備份失敗 · 已暫停資料覆蓋，請匯出備份',
+  storage_error:'本機儲存失敗 · 請立即匯出目前資料'
+};
+function freezeDataEdits(){
+  if(!dataEditsBlocked)return;
+  const allowed=new Set(['settingsBtn','cancelSettings','exportBackupBtn','cloudBtn','closeCloud','exportSyncRecovery','exportBlockedRecovery','historyBtn','closeHistory','cancelOther','cancelFixed','cancelComplete','cancelResetMonth']);
+  document.querySelectorAll('button,input').forEach(el=>{if(!allowed.has(el.id))el.disabled=true;});
+  document.getElementById('recoveryBlockedPanel').hidden=false;
+  document.getElementById('recoveryBlockedMessage').textContent=initialBackupError
+    ? '無法建立安全備份，因此尚未載入或修改原始資料。請先下載復原備份；請勿清除瀏覽器資料。'
+    : '無法安全保存資料，已停止後續修改。畫面可能包含尚未儲存的變更；請立即下載復原備份（含畫面中的資料），並保留瀏覽器原始資料。';
+  if(initialBackupError)document.getElementById('appShell').hidden=true;
+}
+function updateDataStatus(){
+  const mode=syncStatus.mode, text=CLOUD_STATUS_TEXT[mode]||CLOUD_STATUS_TEXT.local;
+  if(mode==='backup_error'||mode==='storage_error')dataEditsBlocked=true;
+  freezeDataEdits();
   const el=document.getElementById('dataStatus'), wrap=document.getElementById('dataStatusWrap');
   if(el) el.textContent=text;
   if(wrap){
     wrap.classList.remove('cloud-ok','cloud-syncing','cloud-error');
-    if(mode) wrap.classList.add(mode);
+    if(mode==='synced')wrap.classList.add('cloud-ok');
+    else if(mode==='syncing'||mode==='pending')wrap.classList.add('cloud-syncing');
+    else if(mode!=='local')wrap.classList.add('cloud-error');
   }
   const summary=document.getElementById('cloudSummary');
-  if(summary) summary.innerHTML='<strong>狀態：</strong>'+escapeHtml(text)+(cloudLastError?'<br><span style="color:#a56a12">'+escapeHtml(cloudLastError)+'</span>':'');
-}
-function updateDataStatus(){
-  if(window.YilanCloud?.enabled?.()){
-    if(window.YilanCloud.getPin()){
-      setCloudStatus(cloudReady?'cloud-ok':'cloud-syncing',cloudReady?'雲端已同步':'雲端同步中');
-    }else setCloudStatus('',state.lastSavedAt?'已存本機 · 尚未連接雲端':'尚未連接雲端');
-  }else{
-    const el=document.getElementById('dataStatus');
-    if(el) el.textContent=state.lastSavedAt?'已自動儲存':'資料已儲存在此裝置';
+  if(summary) summary.textContent='狀態：'+text;
+  const conflict=syncStatus.conflict;
+  document.getElementById('cloudConflict').hidden=!conflict;
+  if(conflict){
+    const otherTab=conflict.kind==='other-tab', remote=conflict.remote?.payload;
+    const label=otherTab?'另一分頁保存的版本':'雲端版本';
+    document.getElementById('cloudConflictDetail').textContent=
+      `這台正在編輯：${state.month}，${state.history?.length||0} 筆歷史；${label}：${remote?.month||'無法讀取'}，${remote?.history?.length||0} 筆歷史。兩份資料均已保留復原備份。選擇前可下載檢查；尚未選擇時不會覆蓋任何一方。`;
+    document.getElementById('useRemoteCloud').textContent=otherTab?'改用另一分頁保存的資料':'改用雲端資料';
   }
+  document.getElementById('cloudProtocolNote').textContent=window.YilanCloud?.atomic
+    ? '新版同步：每次寫入都會核對雲端版本；遇到衝突會保留兩份資料。'
+    : '目前仍連接舊版服務；舊版不保證多裝置同時寫入的原子性。新服務尚未切換，請避免同時編輯。';
 }
-function scheduleCloudSave(){
-  if(!cloudReady || !window.YilanCloud?.enabled?.() || !window.YilanCloud.getPin()) return;
-  clearTimeout(cloudSaveTimer);
-  setCloudStatus('cloud-syncing','正在同步雲端');
-  cloudSaveTimer=setTimeout(cloudSaveNow,700);
-}
-async function cloudSaveNow(){
-  if(!cloudReady || cloudApplying) return;
+function currentTabId(){
   try{
-    const out=await window.YilanCloud.save(state);
-    cloudLastError='';
-    setCloudStatus('cloud-ok','雲端已同步');
-    return out;
-  }catch(e){
-    if(e.status===409){
-      try{
-        const remote=await window.YilanCloud.load();
-        if(remote.exists && remote.payload){
-          cloudApplying=true;
-          state=normalizeState(remote.payload);
-          localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
-          cloudApplying=false;
-          render();
-          cloudLastError='另一台裝置剛剛有更新，已載入雲端最新版';
-          setCloudStatus('cloud-error','已載入雲端最新版');
-          toast('另一台裝置已更新，這台已載入最新版');
-          return;
-        }
-      }catch(_){}
-    }
-    cloudLastError=(e.message==='unauthorized'?'家庭密碼不正確':'目前無法同步，資料已保存在本機');
-    setCloudStatus('cloud-error','雲端同步暫停');
-  }
+    const previous=sessionStorage.getItem('yilanSyncTabId'), id=crypto.randomUUID();
+    // Duplicated tabs inherit sessionStorage; a fresh journal ID prevents collisions.
+    sessionStorage.setItem('yilanSyncTabId',id);
+    return {tabId:id,recoveryDraftId:previous||id};
+  }catch(_){return {tabId:crypto.randomUUID()};}
+}
+if(!initialBackupError){
+  syncController=window.YilanSync.create({
+    storage:localStorage, transport:window.YilanCloud, initialState:state, normalize:normalizeState,
+    ...currentTabId(),
+    canApplyRemote:()=>!document.querySelector('#settingsDialog[open],#fixedFeesDialog[open],#otherDialog[open],#completeDialog[open],#resetMonthDialog[open],#historyDialog[open]'),
+    withLock:navigator.locks ? (key,work)=>navigator.locks.request(key,work) : undefined,
+    onApply:next=>{state=next;render();},
+    onStatus:next=>{syncStatus=next;cloudReady=next.mode==='synced';updateDataStatus();}
+  });
 }
 async function initCloudSync(force=false){
-  if(!window.YilanCloud?.enabled?.()) return;
-  if(!window.YilanCloud.getPin()){
-    cloudReady=false;updateDataStatus();return;
-  }
-  cloudReady=false;cloudLastError='';setCloudStatus('cloud-syncing','正在讀取雲端資料');
+  if(!syncController)return;
+  await syncController.sync();
+  if(force)toast(CLOUD_STATUS_TEXT[syncStatus.mode]||CLOUD_STATUS_TEXT.local);
+}
+function exportSyncRecovery(){
   try{
-    const remote=await window.YilanCloud.load();
-    cloudApplying=true;
-    if(remote.exists && remote.payload){
-      state=normalizeState(remote.payload);
-      localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
-    }else{
-      window.YilanCloud.setRevision(0);
-      cloudReady=true;
-      await window.YilanCloud.save(state);
-    }
-    cloudApplying=false;
-    cloudReady=true;
-    cloudLastError='';
-    render();
-    setCloudStatus('cloud-ok','雲端已同步');
-    if(force) toast('雲端同步完成');
-  }catch(e){
-    cloudApplying=false;
-    cloudReady=false;
-    cloudLastError=(e.status===401?'家庭密碼不正確':'連線失敗，仍可使用本機資料');
-    setCloudStatus('cloud-error','雲端尚未連線');
-    if(force) toast(cloudLastError);
-  }
+    const payload=window.YilanSync.exportRecovery(localStorage);
+    payload.currentInMemory=state?clone(state):null;
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    downloadBlob(blob,`宜蘭同步復原備份_${new Date().toISOString().slice(0,10)}.json`);
+    toast('復原備份已匯出（不含家庭密碼）');
+  }catch(_){toast('無法讀取瀏覽器儲存空間，請勿清除資料');}
 }
 function money(n){ return Math.round(Number(n)||0).toLocaleString('zh-TW'); }
 function num(n){ return Number(n).toLocaleString('zh-TW',{maximumFractionDigits:2}); }
@@ -589,6 +606,7 @@ function updateProgress(){
   document.getElementById('fixedFeesBtn').textContent=fixedReady?'設定房租 / 水費':'先設定房租 / 水費';
   const hasMonthEdits=state.rooms.some(r=>r.curr!=='' || (r.others||[]).length>0);
   document.getElementById('resetMonthBtn').disabled=!hasMonthEdits;
+  freezeDataEdits();
 }
 function updateRoom(i){
   const r=state.rooms[i], c=calc(r);
@@ -610,7 +628,7 @@ function bindInputs(){
       const clean=sanitizeReading(e.target.value);
       if(e.target.value!==clean) e.target.value=clean;
       state.rooms[i].curr=clean;
-      saveState();
+      if(!saveState())return;
       updateRoom(i);
       renderBill();
       renderTenantCards();
@@ -634,7 +652,7 @@ function bindInputs(){
       const input=document.querySelector(`.reading[data-i="${i}"]`);
       state.rooms[i].curr='';
       input.value='';
-      saveState();
+      if(!saveState())return;
       updateRoom(i);
       renderBill();
       renderTenantCards();
@@ -697,7 +715,7 @@ function bindTenantActions(){
   document.querySelectorAll('[data-other-room]').forEach(btn=>btn.onclick=()=>openOther(+btn.dataset.otherRoom));
   document.querySelectorAll('[data-remove-room]').forEach(btn=>btn.onclick=()=>{
     const ri=+btn.dataset.removeRoom, oi=+btn.dataset.removeOther;
-    state.rooms[ri].others.splice(oi,1); saveState(); renderTenantCards(); updateProgress(); toast('已刪除其他費用');
+    state.rooms[ri].others.splice(oi,1); if(!saveState())return; renderTenantCards(); updateProgress(); toast('已刪除其他費用');
   });
   document.querySelectorAll('[data-copy-text-room]').forEach(btn=>btn.onclick=()=>copyTenantText(+btn.dataset.copyTextRoom));
   document.querySelectorAll('[data-copy-card-room]').forEach(btn=>btn.onclick=()=>copyTenantCard(+btn.dataset.copyCardRoom));
@@ -727,7 +745,7 @@ function saveOther(){
   const amount=Number(document.getElementById('otherAmount').value);
   if(currentOtherRoom===null || !name || !Number.isFinite(amount)){toast('請輸入項目名稱與金額');return;}
   state.rooms[currentOtherRoom].others.push({name,amount:Math.round(amount)});
-  saveState(); document.getElementById('otherDialog').close(); renderTenantCards(); updateProgress(); toast('已加入本月其他費用');
+  if(!saveState())return; document.getElementById('otherDialog').close(); renderTenantCards(); updateProgress(); toast('已加入本月其他費用');
 }
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function textBill(){
@@ -837,7 +855,7 @@ function undoLastComplete(){
   state.history.pop();
   state.month=rec.month; state.rate=Number(rec.rate)||state.rate;
   state.rooms=(rec.rooms||[]).map(r=>({room:String(r.room),prev:Number(r.prev)||0,curr:r.curr===undefined||r.curr===null?'':String(r.curr),rent:r.rent===null||r.rent===undefined?null:Number(r.rent),water:r.water===null||r.water===undefined?null:Number(r.water),others:clone(r.others||[])}));
-  state=normalizeState(state); saveState(); render(); renderHistory(); toast('已撤銷上次完成，可重新修改');
+  state=normalizeState(state); if(!saveState())return; render(); renderHistory(); toast('已撤銷上次完成，可重新修改');
 }
 function exportBackup(){
   const payload={app:'宜蘭租屋小幫手',version:APP_VERSION,exportedAt:new Date().toISOString(),state};
@@ -853,7 +871,8 @@ function importBackupFile(file){
       const parsed=JSON.parse(reader.result); const incoming=parsed.state||parsed;
       if(!incoming || !Array.isArray(incoming.rooms)) throw new Error('invalid');
       if(!confirm('匯入備份會覆蓋目前這台裝置上的資料。確定繼續？')) return;
-      state=normalizeState(incoming); saveState(); render(); document.getElementById('settingsDialog').close(); toast('備份已匯入');
+      if(!syncController?.backup('before-user-import',{payload:incoming})) return;
+      state=normalizeState(incoming); if(!saveState())return; render(); document.getElementById('settingsDialog').close(); toast('備份已匯入');
     }catch(e){toast('備份檔格式不正確');}
   };
   reader.readAsText(file);
@@ -871,7 +890,7 @@ document.getElementById('copyTextBtn').onclick=copyText;
 document.getElementById('copyImageBtn').onclick=copyImage;
 document.getElementById('settingsBtn').onclick=()=>document.getElementById('settingsDialog').showModal();
 document.getElementById('cancelSettings').onclick=()=>document.getElementById('settingsDialog').close();
-document.getElementById('saveSettings').onclick=()=>{state.month=document.getElementById('monthInput').value||state.month;state.rate=Number(document.getElementById('rateInput').value)||6;saveState();document.getElementById('settingsDialog').close();render();toast('設定已更新')};
+document.getElementById('saveSettings').onclick=()=>{state.month=document.getElementById('monthInput').value||state.month;state.rate=Number(document.getElementById('rateInput').value)||6;if(!saveState())return;document.getElementById('settingsDialog').close();render();toast('設定已更新')};
 document.getElementById('cloudBtn').onclick=()=>{
   document.getElementById('settingsDialog').close();
   document.getElementById('cloudPinInput').value=window.YilanCloud?.getPin?.()||'';
@@ -889,10 +908,20 @@ document.getElementById('connectCloud').onclick=async()=>{
 document.getElementById('disconnectCloud').onclick=()=>{
   if(!confirm('只會取消這台裝置的雲端連線，本機資料不會刪除。確定？')) return;
   window.YilanCloud.setPin('');
-  window.YilanCloud.setRevision(0);
-  cloudReady=false;cloudLastError='';
+  syncController?.disconnect();
+  cloudReady=false;
   document.getElementById('cloudPinInput').value='';
   updateDataStatus();toast('這台裝置已取消雲端連線');
+};
+document.getElementById('exportSyncRecovery').onclick=exportSyncRecovery;
+document.getElementById('exportBlockedRecovery').onclick=exportSyncRecovery;
+document.getElementById('keepLocalCloud').onclick=async()=>{
+  if(!confirm('已保留雙方復原備份。確定使用這台正在編輯的資料？若雲端又有更新，仍會重新要求選擇。'))return;
+  await syncController?.resolve('local');
+};
+document.getElementById('useRemoteCloud').onclick=async()=>{
+  if(!confirm('已保留雙方復原備份。確定替換這台正在編輯的資料？'))return;
+  await syncController?.resolve('remote');
 };
 document.getElementById('historyBtn').onclick=()=>{renderHistory();document.getElementById('settingsDialog').close();document.getElementById('historyDialog').showModal();};
 document.getElementById('closeHistory').onclick=()=>document.getElementById('historyDialog').close();
@@ -910,7 +939,7 @@ document.getElementById('saveFixed').onclick=()=>{
     r.rent=rentEl.value===''?null:Math.max(0,Math.round(Number(rentEl.value)||0));
     r.water=waterEl.value===''?null:Math.max(0,Math.round(Number(waterEl.value)||0));
   });
-  saveState();document.getElementById('fixedFeesDialog').close();renderTenantCards();updateProgress();toast('房租與水費已儲存');
+  if(!saveState())return;document.getElementById('fixedFeesDialog').close();renderTenantCards();updateProgress();toast('房租與水費已儲存');
 };
 
 document.getElementById('cancelOther').onclick=()=>document.getElementById('otherDialog').close();
@@ -920,7 +949,7 @@ document.getElementById('resetMonthBtn').onclick=()=>document.getElementById('re
 document.getElementById('cancelResetMonth').onclick=()=>document.getElementById('resetMonthDialog').close();
 document.getElementById('confirmResetMonth').onclick=()=>{
   state.rooms=state.rooms.map(r=>({...r,curr:'',others:[]}));
-  saveState();
+  if(!saveState())return;
   document.getElementById('resetMonthDialog').close();
   render();
   toast('本月已還原，可重新輸入');
@@ -937,13 +966,17 @@ document.getElementById('confirmComplete').onclick=()=>{
   };
   state.history=state.history||[];state.history.push(record);
   state.rooms=state.rooms.map(r=>({room:r.room,prev:Number(r.curr),curr:'',rent:r.rent,water:r.water,others:[]}));
-  state.month=nextMonth(state.month);saveState();document.getElementById('completeDialog').close();render();toast('已完成：電表帶到下月，其他費用已清空');window.scrollTo({top:0,behavior:'smooth'});
+  state.month=nextMonth(state.month);if(!saveState())return;document.getElementById('completeDialog').close();render();toast('已完成：電表帶到下月，其他費用已清空');window.scrollTo({top:0,behavior:'smooth'});
 };
 
-render(); updateDataStatus();
+if(!initialBackupError)render();
+updateDataStatus();
 if(window.YilanCloud?.enabled?.()) initCloudSync(false);
-window.addEventListener('focus',()=>{if(cloudReady)initCloudSync(false);});
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&cloudReady)initCloudSync(false);});
+window.addEventListener('focus',()=>initCloudSync(false));
+window.addEventListener('online',()=>initCloudSync(false));
+document.querySelectorAll('dialog').forEach(dialog=>dialog.addEventListener('close',()=>initCloudSync(false)));
+window.addEventListener('storage',event=>syncController?.observeStorage(event));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')initCloudSync(false);});
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}
 </script>
 </body>
