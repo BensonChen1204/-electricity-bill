@@ -1,9 +1,12 @@
 # Cloudflare sync v3: review and cutover checklist
 
-This is a **source-only migration candidate**. The checked-in `cloud-config.js`
-still points at the existing Supabase service. No existing Worker is changed.
-The new Worker has no public route, an unconfigured database placeholder, and a
-required authentication secret. Do not deploy or merge before the gates below.
+The new isolated Worker and D1 have been provisioned. The checked-in
+`cloud-config.js` still points at the existing Supabase service. No existing
+Worker is changed. The new endpoint is
+`https://yilan-sync-v3.neihu0122.workers.dev/v1/state`; it fails closed until the
+user configures its required secret. Do not switch the frontend before the gates
+below. All tests, including the synthetic Chromium mobile/PWA smoke, passed in
+[CI](https://github.com/BensonChen1204/-electricity-bill/actions/runs/36802611663).
 
 ## What changes
 
