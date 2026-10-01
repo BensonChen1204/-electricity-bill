@@ -63,6 +63,7 @@ const server=http.createServer(async(req,res)=>{
     await page.locator('#closeCloud').click();
     // Same controls and calculation semantics remain intact.
     await page.locator('.reading').first().fill('15');
+    assert.equal(await page.locator('.reading').first().inputValue(),'15','focus must not move a replacement selection to the end');
     await page.waitForFunction(()=>document.getElementById('dataStatus').textContent==='雲端已同步');
     assert.equal(remote.rooms[0].curr,'15');assert.equal(posts,1);
     offline=true;await page.locator('.reading').first().fill('18');

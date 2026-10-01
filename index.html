@@ -671,7 +671,8 @@ function bindInputs(){
       }
     });
     el.addEventListener('focus',e=>{
-      setTimeout(()=>{try{e.target.setSelectionRange(e.target.value.length,e.target.value.length)}catch(_){}},0);
+      // Do this during focus, not in a later timer that can undo a user's selection.
+      try{e.target.setSelectionRange(e.target.value.length,e.target.value.length)}catch(_){}
     });
   });
   document.querySelectorAll('.clear-reading').forEach(btn=>{
