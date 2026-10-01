@@ -670,10 +670,7 @@ function bindInputs(){
         if(next){next.focus();next.select();}else e.target.blur();
       }
     });
-    el.addEventListener('focus',e=>{
-      // Do this during focus, not in a later timer that can undo a user's selection.
-      try{e.target.setSelectionRange(e.target.value.length,e.target.value.length)}catch(_){}
-    });
+    // Preserve the browser's/user's selection; never force the caret on focus.
   });
   document.querySelectorAll('.clear-reading').forEach(btn=>{
     btn.addEventListener('click',()=>{
